@@ -19,10 +19,13 @@ package pod
 import (
 	"flag"
 	"fmt"
+	"strings"
 
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/kubernetes/test/e2e/framework"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 	psaapi "k8s.io/pod-security-admission/api"
 	psapolicy "k8s.io/pod-security-admission/policy"
@@ -42,11 +45,11 @@ func NodeOSDistroIs(distro string) bool {
 	return false
 }
 
+const InfiniteSleepCommand = "trap exit TERM; while true; do sleep 1; done"
+
 // GenerateScriptCmd generates the corresponding command lines to execute a command.
 func GenerateScriptCmd(command string) []string {
-	var commands []string
-	commands = []string{"/bin/sh", "-c", command}
-	return commands
+	return []string{"/bin/sh", "-c", command}
 }
 
 // GetDefaultTestImage returns the default test image based on OS.
@@ -111,12 +114,25 @@ func GeneratePodSecurityContext(fsGroup *int64, seLinuxOptions *v1.SELinuxOption
 // GenerateContainerSecurityContext generates the corresponding container security context with the given inputs
 // If the Node OS is windows, currently we will ignore the inputs and return nil.
 // TODO: Will modify it after windows has its own security context
-func GenerateContainerSecurityContext(privileged bool) *v1.SecurityContext {
+func GenerateContainerSecurityContext(level psaapi.Level) *v1.SecurityContext {
 	if NodeOSDistroIs("windows") {
 		return nil
 	}
-	return &v1.SecurityContext{
-		Privileged: &privileged,
+
+	switch level {
+	case psaapi.LevelBaseline:
+		return &v1.SecurityContext{
+			Privileged: pointer.Bool(false),
+		}
+	case psaapi.LevelPrivileged:
+		return &v1.SecurityContext{
+			Privileged: pointer.Bool(true),
+		}
+	case psaapi.LevelRestricted:
+		return GetRestrictedContainerSecurityContext()
+	default:
+		ginkgo.Fail(fmt.Sprintf("unknown k8s.io/pod-security-admission/policy.Level %q", level))
+		panic("not reached")
 	}
 }
 
@@ -260,4 +276,34 @@ func FindContainerStatusInPod(pod *v1.Pod, containerName string) *v1.ContainerSt
 		}
 	}
 	return nil
+}
+
+// VerifyCgroupValue verifies that the given cgroup path has the expected value in
+// the specified container of the pod. It execs into the container to retrive the
+// cgroup value and compares it against the expected value.
+func VerifyCgroupValue(f *framework.Framework, pod *v1.Pod, cName, cgPath, expectedCgValue string) error {
+	cmd := fmt.Sprintf("head -n 1 %s", cgPath)
+	framework.Logf("Namespace %s Pod %s Container %s - looking for cgroup value %s in path %s",
+		pod.Namespace, pod.Name, cName, expectedCgValue, cgPath)
+	cgValue, _, err := ExecCommandInContainerWithFullOutput(f, pod.Name, cName, "/bin/sh", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("failed to find expected value %q in container cgroup %q", expectedCgValue, cgPath)
+	}
+	cgValue = strings.Trim(cgValue, "\n")
+	if cgValue != expectedCgValue {
+		return fmt.Errorf("cgroup value %q not equal to expected %q", cgValue, expectedCgValue)
+	}
+	return nil
+}
+
+// IsPodOnCgroupv2Node checks whether the pod is running on cgroupv2 node.
+// TODO: Deduplicate this function with NPD cluster e2e test:
+// https://github.com/kubernetes/kubernetes/blob/2049360379bcc5d6467769cef112e6e492d3d2f0/test/e2e/node/node_problem_detector.go#L369
+func IsPodOnCgroupv2Node(f *framework.Framework, pod *v1.Pod) bool {
+	cmd := "mount -t cgroup2"
+	out, _, err := ExecCommandInContainerWithFullOutput(f, pod.Name, pod.Spec.Containers[0].Name, "/bin/sh", "-c", cmd)
+	if err != nil {
+		return false
+	}
+	return len(out) != 0
 }

@@ -30,13 +30,13 @@ func addOSValidator(validators []system.Validator, _ *system.StreamReporter) []s
 	return validators
 }
 
-// addIPv6Checks adds IPv6 related bridgenf and forwarding checks
+// addIPv6Checks adds IPv6 related checks
 // No-op for Darwin (MacOS), Windows.
 func addIPv6Checks(checks []Checker) []Checker {
 	return checks
 }
 
-// addIPv4Checks adds IPv4 related bridgenf and forwarding checks
+// addIPv4Checks adds IPv4 related checks
 // No-op for Darwin (MacOS), Windows.
 func addIPv4Checks(checks []Checker) []Checker {
 	return checks
@@ -50,6 +50,6 @@ func addSwapCheck(checks []Checker) []Checker {
 
 // addExecChecks adds checks that verify if certain binaries are in PATH
 // No-op for Darwin (MacOS), Windows.
-func addExecChecks(checks []Checker, _ utilsexec.Interface) []Checker {
+func addExecChecks(checks []Checker, _ utilsexec.Interface, _ string) []Checker {
 	return checks
 }

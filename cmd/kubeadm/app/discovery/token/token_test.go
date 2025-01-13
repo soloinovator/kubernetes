@@ -248,7 +248,7 @@ users: null
 			}
 
 			// Set arbitrary discovery timeout and retry interval
-			test.cfg.Timeout = &metav1.Duration{Duration: time.Millisecond * 200}
+			timeout := time.Millisecond * 500
 			interval := time.Millisecond * 20
 
 			// Patch the JWS signature after a short delay
@@ -263,13 +263,13 @@ users: null
 			}
 
 			// Retrieve validated configuration
-			kubeconfig, err = retrieveValidatedConfigInfo(client, test.cfg, interval)
+			kubeconfig, err = retrieveValidatedConfigInfo(client, test.cfg, interval, timeout, false, true)
 			if (err != nil) != test.expectedError {
 				t.Errorf("expected error %v, got %v, error: %v", test.expectedError, err != nil, err)
 			}
 
 			// Return if an error is expected
-			if test.expectedError {
+			if err != nil {
 				return
 			}
 
@@ -303,7 +303,7 @@ type fakeConfigMap struct {
 }
 
 func (c *fakeConfigMap) createOrUpdate(client clientset.Interface) error {
-	return apiclient.CreateOrUpdateConfigMap(client, &v1.ConfigMap{
+	return apiclient.CreateOrUpdate(client.CoreV1().ConfigMaps(metav1.NamespacePublic), &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      c.name,
 			Namespace: metav1.NamespacePublic,

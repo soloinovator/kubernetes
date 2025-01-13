@@ -54,6 +54,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/runtime/serializer/cbor"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/protobuf"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
@@ -69,8 +70,10 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 	"k8s.io/apiserver/pkg/endpoints/metrics"
 	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/registry/generic"
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/apiserver/pkg/warning"
 	"k8s.io/client-go/scale"
@@ -79,8 +82,6 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kube-openapi/pkg/spec3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
-	"k8s.io/kube-openapi/pkg/validation/strfmt"
-	"k8s.io/kube-openapi/pkg/validation/validate"
 )
 
 // crdHandler serves the `/apis` endpoint.
@@ -324,7 +325,10 @@ func (r *crdHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	supportedTypes := []string{
 		string(types.JSONPatchType),
 		string(types.MergePatchType),
-		string(types.ApplyPatchType),
+		string(types.ApplyYAMLPatchType),
+	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.CBORServingAndStorage) {
+		supportedTypes = append(supportedTypes, string(types.ApplyCBORPatchType))
 	}
 
 	var handlerFunc http.HandlerFunc
@@ -656,13 +660,13 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			return nil, fmt.Errorf("failed converting CRD validation to internal version: %v", err)
 		}
 		s, err := structuralschema.NewStructural(internalValidation.OpenAPIV3Schema)
-		if crd.Spec.PreserveUnknownFields == false && err != nil {
+		if !crd.Spec.PreserveUnknownFields && err != nil {
 			// This should never happen. If it does, it is a programming error.
 			utilruntime.HandleError(fmt.Errorf("failed to convert schema to structural: %v", err))
 			return nil, fmt.Errorf("the server could not properly serve the CR schema") // validation should avoid this
 		}
 
-		if crd.Spec.PreserveUnknownFields == false {
+		if !crd.Spec.PreserveUnknownFields {
 			// we don't own s completely, e.g. defaults are not deep-copied. So better make a copy here.
 			s = s.DeepCopy()
 
@@ -727,8 +731,20 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 		parameterCodec := runtime.NewParameterCodec(parameterScheme)
 
 		resource := schema.GroupVersionResource{Group: crd.Spec.Group, Version: v.Name, Resource: crd.Status.AcceptedNames.Plural}
+		if len(resource.Resource) == 0 {
+			utilruntime.HandleError(fmt.Errorf("CustomResourceDefinition %s has unexpected empty status.acceptedNames.plural", crd.Name))
+			return nil, fmt.Errorf("the server could not properly serve the resource")
+		}
 		singularResource := schema.GroupVersionResource{Group: crd.Spec.Group, Version: v.Name, Resource: crd.Status.AcceptedNames.Singular}
+		if len(singularResource.Resource) == 0 {
+			utilruntime.HandleError(fmt.Errorf("CustomResourceDefinition %s has unexpected empty status.acceptedNames.singular", crd.Name))
+			return nil, fmt.Errorf("the server could not properly serve the resource")
+		}
 		kind := schema.GroupVersionKind{Group: crd.Spec.Group, Version: v.Name, Kind: crd.Status.AcceptedNames.Kind}
+		if len(kind.Kind) == 0 {
+			utilruntime.HandleError(fmt.Errorf("CustomResourceDefinition %s has unexpected empty status.acceptedNames.kind", crd.Name))
+			return nil, fmt.Errorf("the server could not properly serve the kind")
+		}
 		equivalentResourceRegistry.RegisterKindFor(resource, "", kind)
 
 		typer := newUnstructuredObjectTyper(parameterScheme)
@@ -739,20 +755,22 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			utilruntime.HandleError(err)
 			return nil, fmt.Errorf("the server could not properly serve the CR schema")
 		}
+		var internalSchemaProps *apiextensionsinternal.JSONSchemaProps
 		var internalValidationSchema *apiextensionsinternal.CustomResourceValidation
 		if validationSchema != nil {
 			internalValidationSchema = &apiextensionsinternal.CustomResourceValidation{}
 			if err := apiextensionsv1.Convert_v1_CustomResourceValidation_To_apiextensions_CustomResourceValidation(validationSchema, internalValidationSchema, nil); err != nil {
 				return nil, fmt.Errorf("failed to convert CRD validation to internal version: %v", err)
 			}
+			internalSchemaProps = internalValidationSchema.OpenAPIV3Schema
 		}
-		validator, _, err := apiservervalidation.NewSchemaValidator(internalValidationSchema)
+		validator, _, err := apiservervalidation.NewSchemaValidator(internalSchemaProps)
 		if err != nil {
 			return nil, err
 		}
 
 		var statusSpec *apiextensionsinternal.CustomResourceSubresourceStatus
-		var statusValidator *validate.SchemaValidator
+		var statusValidator apiservervalidation.SchemaValidator
 		subresources, err := apiextensionshelpers.GetSubresourcesForVersion(crd, v.Name)
 		if err != nil {
 			utilruntime.HandleError(err)
@@ -767,11 +785,10 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			// for the status subresource, validate only against the status schema
 			if internalValidationSchema != nil && internalValidationSchema.OpenAPIV3Schema != nil && internalValidationSchema.OpenAPIV3Schema.Properties != nil {
 				if statusSchema, ok := internalValidationSchema.OpenAPIV3Schema.Properties["status"]; ok {
-					openapiSchema := &spec.Schema{}
-					if err := apiservervalidation.ConvertJSONSchemaPropsWithPostProcess(&statusSchema, openapiSchema, apiservervalidation.StripUnsupportedFormatsPostProcess); err != nil {
+					statusValidator, _, err = apiservervalidation.NewSchemaValidator(&statusSchema)
+					if err != nil {
 						return nil, err
 					}
-					statusValidator = validate.NewSchemaValidator(openapiSchema, nil, "", strfmt.Default)
 				}
 			}
 		}
@@ -795,20 +812,27 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			klog.V(2).Infof("The CRD for %v has an invalid printer specification, falling back to default printing: %v", kind, err)
 		}
 
+		listKind := schema.GroupVersionKind{Group: crd.Spec.Group, Version: v.Name, Kind: crd.Status.AcceptedNames.ListKind}
+		if len(listKind.Kind) == 0 {
+			utilruntime.HandleError(fmt.Errorf("CustomResourceDefinition %s has unexpected empty status.acceptedNames.listKind", crd.Name))
+			return nil, fmt.Errorf("the server could not properly serve the list kind")
+		}
+
 		storages[v.Name] = customresource.NewStorage(
 			resource.GroupResource(),
 			singularResource.GroupResource(),
 			kind,
-			schema.GroupVersionKind{Group: crd.Spec.Group, Version: v.Name, Kind: crd.Status.AcceptedNames.ListKind},
+			listKind,
 			customresource.NewStrategy(
 				typer,
 				crd.Spec.Scope == apiextensionsv1.NamespaceScoped,
 				kind,
 				validator,
 				statusValidator,
-				structuralSchemas,
+				structuralSchemas[v.Name],
 				statusSpec,
 				scaleSpec,
+				v.SelectableFields,
 			),
 			crdConversionRESTOptionsGetter{
 				RESTOptionsGetter:     r.restOptionsGetter,
@@ -834,7 +858,51 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 			structuralSchemas:     structuralSchemas,
 			structuralSchemaGK:    kind.GroupKind(),
 			preserveUnknownFields: crd.Spec.PreserveUnknownFields,
+			supportedMediaTypes: []runtime.SerializerInfo{
+				{
+					MediaType:        "application/json",
+					MediaTypeType:    "application",
+					MediaTypeSubType: "json",
+					EncodesAsText:    true,
+					Serializer:       json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{}),
+					PrettySerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{Pretty: true}),
+					StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{
+						Strict: true,
+					}),
+					StreamSerializer: &runtime.StreamSerializerInfo{
+						EncodesAsText: true,
+						Serializer:    json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{}),
+						Framer:        json.Framer,
+					},
+				},
+				{
+					MediaType:        "application/yaml",
+					MediaTypeType:    "application",
+					MediaTypeSubType: "yaml",
+					EncodesAsText:    true,
+					Serializer:       json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{Yaml: true}),
+					StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{
+						Yaml:   true,
+						Strict: true,
+					}),
+				},
+				{
+					MediaType:        "application/vnd.kubernetes.protobuf",
+					MediaTypeType:    "application",
+					MediaTypeSubType: "vnd.kubernetes.protobuf",
+					Serializer:       protobuf.NewSerializer(creator, typer),
+					StreamSerializer: &runtime.StreamSerializerInfo{
+						Serializer: protobuf.NewRawSerializer(creator, typer),
+						Framer:     protobuf.LengthDelimitedFramer,
+					},
+				},
+			},
 		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.CBORServingAndStorage) {
+			negotiatedSerializer.supportedMediaTypes = append(negotiatedSerializer.supportedMediaTypes, cbor.NewSerializerInfo(creator, typer))
+		}
+
 		var standardSerializers []runtime.SerializerInfo
 		for _, s := range negotiatedSerializer.SupportedMediaTypes() {
 			if s.MediaType == runtime.ContentTypeProtobuf {
@@ -898,7 +966,11 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 		scaleScope := *requestScopes[v.Name]
 		scaleConverter := scale.NewScaleConverter()
 		scaleScope.Subresource = "scale"
-		scaleScope.Serializer = serializer.NewCodecFactory(scaleConverter.Scheme())
+		var opts []serializer.CodecFactoryOptionsMutator
+		if utilfeature.DefaultFeatureGate.Enabled(features.CBORServingAndStorage) {
+			opts = append(opts, serializer.WithSerializer(cbor.NewSerializerInfo))
+		}
+		scaleScope.Serializer = serializer.NewCodecFactory(scaleConverter.Scheme(), opts...)
 		scaleScope.Kind = autoscalingv1.SchemeGroupVersion.WithKind("Scale")
 		scaleScope.Namer = handlers.ContextBasedNaming{
 			Namer:         meta.NewAccessor(),
@@ -986,7 +1058,7 @@ func scopeWithFieldManager(typeConverter managedfields.TypeConverter, reqScope h
 		reqScope.Kind,
 		reqScope.HubGroupVersion,
 		subresource,
-		resetFields,
+		fieldpath.NewExcludeFilterSetMap(resetFields),
 	)
 	if err != nil {
 		return handlers.RequestScope{}, err
@@ -1022,48 +1094,12 @@ type unstructuredNegotiatedSerializer struct {
 	structuralSchemas     map[string]*structuralschema.Structural // by version
 	structuralSchemaGK    schema.GroupKind
 	preserveUnknownFields bool
+
+	supportedMediaTypes []runtime.SerializerInfo
 }
 
 func (s unstructuredNegotiatedSerializer) SupportedMediaTypes() []runtime.SerializerInfo {
-	return []runtime.SerializerInfo{
-		{
-			MediaType:        "application/json",
-			MediaTypeType:    "application",
-			MediaTypeSubType: "json",
-			EncodesAsText:    true,
-			Serializer:       json.NewSerializer(json.DefaultMetaFactory, s.creator, s.typer, false),
-			PrettySerializer: json.NewSerializer(json.DefaultMetaFactory, s.creator, s.typer, true),
-			StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, s.creator, s.typer, json.SerializerOptions{
-				Strict: true,
-			}),
-			StreamSerializer: &runtime.StreamSerializerInfo{
-				EncodesAsText: true,
-				Serializer:    json.NewSerializer(json.DefaultMetaFactory, s.creator, s.typer, false),
-				Framer:        json.Framer,
-			},
-		},
-		{
-			MediaType:        "application/yaml",
-			MediaTypeType:    "application",
-			MediaTypeSubType: "yaml",
-			EncodesAsText:    true,
-			Serializer:       json.NewYAMLSerializer(json.DefaultMetaFactory, s.creator, s.typer),
-			StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, s.creator, s.typer, json.SerializerOptions{
-				Yaml:   true,
-				Strict: true,
-			}),
-		},
-		{
-			MediaType:        "application/vnd.kubernetes.protobuf",
-			MediaTypeType:    "application",
-			MediaTypeSubType: "vnd.kubernetes.protobuf",
-			Serializer:       protobuf.NewSerializer(s.creator, s.typer),
-			StreamSerializer: &runtime.StreamSerializerInfo{
-				Serializer: protobuf.NewRawSerializer(s.creator, s.typer),
-				Framer:     protobuf.LengthDelimitedFramer,
-			},
-		},
-	}
+	return s.supportedMediaTypes
 }
 
 func (s unstructuredNegotiatedSerializer) EncoderForVersion(encoder runtime.Encoder, gv runtime.GroupVersioner) runtime.Encoder {
@@ -1157,8 +1193,9 @@ type crdConversionRESTOptionsGetter struct {
 	preserveUnknownFields bool
 }
 
-func (t crdConversionRESTOptionsGetter) GetRESTOptions(resource schema.GroupResource) (generic.RESTOptions, error) {
-	ret, err := t.RESTOptionsGetter.GetRESTOptions(resource)
+func (t crdConversionRESTOptionsGetter) GetRESTOptions(resource schema.GroupResource, example runtime.Object) (generic.RESTOptions, error) {
+	// Explicitly ignore example, we override storageconfig below
+	ret, err := t.RESTOptionsGetter.GetRESTOptions(resource, nil)
 	if err == nil {
 		d := schemaCoercingDecoder{delegate: ret.StorageConfig.Codec, validator: unstructuredSchemaCoercer{
 			// drop invalid fields while decoding old CRs (before we haven't had any ObjectMeta validation)

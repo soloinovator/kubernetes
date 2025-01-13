@@ -17,26 +17,54 @@ limitations under the License.
 package etcd
 
 import (
+	"strings"
+
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/test/integration/fixtures"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilversion "k8s.io/component-base/version"
 
 	"k8s.io/kubernetes/test/utils/image"
 )
 
-// GetEtcdStorageData returns etcd data for all persisted objects.
+// GetSupportedEmulatedVersions provides the list of supported emulated versions in the etcd data.
+// Tests aiming for full coverage of versions should test fixtures of all supported versions.
+func GetSupportedEmulatedVersions() []string {
+	return []string{
+		utilversion.DefaultKubeEffectiveVersion().BinaryVersion().SubtractMinor(2).String(),
+		utilversion.DefaultKubeEffectiveVersion().BinaryVersion().SubtractMinor(1).String(),
+		utilversion.DefaultKubeEffectiveVersion().BinaryVersion().String(),
+	}
+}
+
+// GetEtcdStorageData returns etcd data for all persisted objects at the latest release version.
 // It is exported so that it can be reused across multiple tests.
 // It returns a new map on every invocation to prevent different tests from mutating shared state.
 func GetEtcdStorageData() map[schema.GroupVersionResource]StorageData {
-	return GetEtcdStorageDataForNamespace("etcdstoragepathtestnamespace")
+	return GetEtcdStorageDataServedAt(utilversion.DefaultKubeBinaryVersion, false)
 }
 
-// GetEtcdStorageDataForNamespace returns etcd data for all persisted objects.
+// GetEtcdStorageDataServedAt returns etcd data for all persisted objects at a particular release version.
+// It is exported so that it can be reused across multiple tests.
+// It returns a new map on every invocation to prevent different tests from mutating shared state.
+func GetEtcdStorageDataServedAt(version string, removeAlphas bool) map[schema.GroupVersionResource]StorageData {
+	return GetEtcdStorageDataForNamespaceServedAt("etcdstoragepathtestnamespace", version, removeAlphas)
+}
+
+// GetEtcdStorageDataForNamespace returns etcd data for all persisted objects at the latest release version.
 // It is exported so that it can be reused across multiple tests.
 // It returns a new map on every invocation to prevent different tests from mutating shared state.
 // Namespaced objects keys are computed for the specified namespace.
 func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionResource]StorageData {
+	return GetEtcdStorageDataForNamespaceServedAt(namespace, utilversion.DefaultKubeBinaryVersion, false)
+}
+
+// GetEtcdStorageDataForNamespaceServedAt returns etcd data for all persisted objects at a particular release version.
+// It is exported so that it can be reused across multiple tests.
+// It returns a new map on every invocation to prevent different tests from mutating shared state.
+// Namespaced objects keys are computed for the specified namespace.
+func GetEtcdStorageDataForNamespaceServedAt(namespace string, version string, removeAlphas bool) map[schema.GroupVersionResource]StorageData {
 	image := image.GetE2EImage(image.BusyBox)
 	etcdStorageData := map[schema.GroupVersionResource]StorageData{
 		// k8s.io/kubernetes/pkg/api/v1
@@ -45,7 +73,7 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 			ExpectedEtcdPath: "/registry/configmaps/" + namespace + "/cm1",
 		},
 		gvr("", "v1", "services"): {
-			Stub:             `{"metadata": {"name": "service1"}, "spec": {"externalName": "service1name", "ports": [{"port": 10000, "targetPort": 11000}], "selector": {"test": "data"}}}`,
+			Stub:             `{"metadata": {"name": "service1"}, "spec": {"type": "LoadBalancer", "ports": [{"port": 10000, "targetPort": 11000}], "selector": {"test": "data"}}}`,
 			ExpectedEtcdPath: "/registry/services/specs/" + namespace + "/service1",
 		},
 		gvr("", "v1", "podtemplates"): {
@@ -172,11 +200,17 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
+		// k8s.io/kubernetes/pkg/apis/coordination/v1alpha2
+		gvr("coordination.k8s.io", "v1alpha2", "leasecandidates"): {
+			Stub:             `{"metadata": {"name": "leasecandidatev1alpha2"}, "spec": {"leaseName": "lease", "binaryVersion": "0.1.0", "emulationVersion": "0.1.0", "strategy": "OldestEmulationVersion"}}`,
+			ExpectedEtcdPath: "/registry/leasecandidates/" + namespace + "/leasecandidatev1alpha2",
+		},
+		// --
+
 		// k8s.io/kubernetes/pkg/apis/discovery/v1
 		gvr("discovery.k8s.io", "v1", "endpointslices"): {
 			Stub:             `{"metadata": {"name": "slicev1"}, "addressType": "IPv4", "protocol": "TCP", "ports": [], "endpoints": []}`,
 			ExpectedEtcdPath: "/registry/endpointslices/" + namespace + "/slicev1",
-			ExpectedGVK:      gvkP("discovery.k8s.io", "v1beta1", "EndpointSlice"),
 		},
 		// --
 
@@ -203,17 +237,17 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
-		// k8s.io/kubernetes/pkg/apis/networking/v1alpha1
-		gvr("networking.k8s.io", "v1alpha1", "clustercidrs"): {
-			Stub:             `{"metadata": {"name": "clustercidr1"}, "spec": {"perNodeHostBits": 8, "ipv4": "192.168.4.0/24", "ipv6": "fd00:1::/120", "nodeSelector": null}}`,
-			ExpectedEtcdPath: "/registry/clustercidrs/clustercidr1",
+		// k8s.io/kubernetes/pkg/apis/networking/v1beta1
+		gvr("networking.k8s.io", "v1beta1", "ipaddresses"): {
+			Stub:             `{"metadata": {"name": "192.168.1.3"}, "spec": {"parentRef": {"resource": "services","name": "test", "namespace": "ns"}}}`,
+			ExpectedEtcdPath: "/registry/ipaddresses/192.168.1.3",
 		},
 		// --
 
-		// k8s.io/kubernetes/pkg/apis/networking/v1alpha1
-		gvr("networking.k8s.io", "v1alpha1", "ipaddresses"): {
-			Stub:             `{"metadata": {"name": "192.168.1.2"}, "spec": {"parentRef": {"resource": "services","name": "test", "namespace": "ns"}}}`,
-			ExpectedEtcdPath: "/registry/ipaddresses/192.168.1.2",
+		// k8s.io/kubernetes/pkg/apis/networking/v1beta1
+		gvr("networking.k8s.io", "v1beta1", "servicecidrs"): {
+			Stub:             `{"metadata": {"name": "range-b1"}, "spec": {"cidrs": ["192.168.0.0/16","fd00:1::/120"]}}`,
+			ExpectedEtcdPath: "/registry/servicecidrs/range-b1",
 		},
 		// --
 
@@ -224,67 +258,10 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
-		// k8s.io/kubernetes/pkg/apis/policy/v1beta1
-		gvr("policy", "v1beta1", "poddisruptionbudgets"): {
-			Stub:             `{"metadata": {"name": "pdb1"}, "spec": {"selector": {"matchLabels": {"anokkey": "anokvalue"}}}}`,
-			ExpectedEtcdPath: "/registry/poddisruptionbudgets/" + namespace + "/pdb1",
-			ExpectedGVK:      gvkP("policy", "v1", "PodDisruptionBudget"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/storage/v1alpha1
-		gvr("storage.k8s.io", "v1alpha1", "csistoragecapacities"): {
-			Stub:             `{"metadata": {"name": "csc-12345-1"}, "storageClassName": "sc1"}`,
-			ExpectedEtcdPath: "/registry/csistoragecapacities/" + namespace + "/csc-12345-1",
-			ExpectedGVK:      gvkP("storage.k8s.io", "v1", "CSIStorageCapacity"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1alpha1
-		gvr("flowcontrol.apiserver.k8s.io", "v1alpha1", "flowschemas"): {
-			Stub:             `{"metadata": {"name": "va1"}, "spec": {"priorityLevelConfiguration": {"name": "name1"}}}`,
-			ExpectedEtcdPath: "/registry/flowschemas/va1",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "FlowSchema"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1alpha1
-		gvr("flowcontrol.apiserver.k8s.io", "v1alpha1", "prioritylevelconfigurations"): {
-			Stub:             `{"metadata": {"name": "conf1"}, "spec": {"type": "Limited", "limited": {"assuredConcurrencyShares":3, "limitResponse": {"type": "Reject"}}}}`,
-			ExpectedEtcdPath: "/registry/prioritylevelconfigurations/conf1",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "PriorityLevelConfiguration"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1beta1
-		gvr("flowcontrol.apiserver.k8s.io", "v1beta1", "flowschemas"): {
-			Stub:             `{"metadata": {"name": "va2"}, "spec": {"priorityLevelConfiguration": {"name": "name1"}}}`,
-			ExpectedEtcdPath: "/registry/flowschemas/va2",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "FlowSchema"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1beta1
-		gvr("flowcontrol.apiserver.k8s.io", "v1beta1", "prioritylevelconfigurations"): {
-			Stub:             `{"metadata": {"name": "conf2"}, "spec": {"type": "Limited", "limited": {"assuredConcurrencyShares":3, "limitResponse": {"type": "Reject"}}}}`,
-			ExpectedEtcdPath: "/registry/prioritylevelconfigurations/conf2",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "PriorityLevelConfiguration"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1beta2
-		gvr("flowcontrol.apiserver.k8s.io", "v1beta2", "flowschemas"): {
-			Stub:             `{"metadata": {"name": "fs-1"}, "spec": {"priorityLevelConfiguration": {"name": "name1"}}}`,
-			ExpectedEtcdPath: "/registry/flowschemas/fs-1",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "FlowSchema"),
-		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1beta2
-		gvr("flowcontrol.apiserver.k8s.io", "v1beta2", "prioritylevelconfigurations"): {
-			Stub:             `{"metadata": {"name": "conf3"}, "spec": {"type": "Limited", "limited": {"assuredConcurrencyShares":3, "limitResponse": {"type": "Reject"}}}}`,
-			ExpectedEtcdPath: "/registry/prioritylevelconfigurations/conf3",
-			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1beta3", "PriorityLevelConfiguration"),
+		// k8s.io/kubernetes/pkg/apis/storagemigration/v1alpha1
+		gvr("storagemigration.k8s.io", "v1alpha1", "storageversionmigrations"): {
+			Stub:             `{"metadata": {"name": "test-migration"}, "spec":{"resource": {"group": "test-group", "resource": "test-resource", "version": "test-version"}}}`,
+			ExpectedEtcdPath: "/registry/storageversionmigrations/test-migration",
 		},
 		// --
 
@@ -292,6 +269,7 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "flowschemas"): {
 			Stub:             `{"metadata": {"name": "fs-2"}, "spec": {"priorityLevelConfiguration": {"name": "name1"}}}`,
 			ExpectedEtcdPath: "/registry/flowschemas/fs-2",
+			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1", "FlowSchema"),
 		},
 		// --
 
@@ -299,6 +277,21 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "prioritylevelconfigurations"): {
 			Stub:             `{"metadata": {"name": "conf4"}, "spec": {"type": "Limited", "limited": {"nominalConcurrencyShares":3, "limitResponse": {"type": "Reject"}}}}`,
 			ExpectedEtcdPath: "/registry/prioritylevelconfigurations/conf4",
+			ExpectedGVK:      gvkP("flowcontrol.apiserver.k8s.io", "v1", "PriorityLevelConfiguration"),
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1
+		gvr("flowcontrol.apiserver.k8s.io", "v1", "flowschemas"): {
+			Stub:             `{"metadata": {"name": "fs-3"}, "spec": {"priorityLevelConfiguration": {"name": "name1"}}}`,
+			ExpectedEtcdPath: "/registry/flowschemas/fs-3",
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/flowcontrol/v1
+		gvr("flowcontrol.apiserver.k8s.io", "v1", "prioritylevelconfigurations"): {
+			Stub:             `{"metadata": {"name": "conf5"}, "spec": {"type": "Limited", "limited": {"nominalConcurrencyShares":3, "limitResponse": {"type": "Reject"}}}}`,
+			ExpectedEtcdPath: "/registry/prioritylevelconfigurations/conf5",
 		},
 		// --
 
@@ -309,11 +302,18 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
+		// k8s.io/kubernetes/pkg/apis/storage/v1alpha1
+		gvr("storage.k8s.io", "v1alpha1", "volumeattributesclasses"): {
+			Stub:             `{"metadata": {"name": "vac1"}, "driverName": "example.com/driver", "parameters": {"foo": "bar"}}`,
+			ExpectedEtcdPath: "/registry/volumeattributesclasses/vac1",
+			ExpectedGVK:      gvkP("storage.k8s.io", "v1beta1", "VolumeAttributesClass"),
+		},
+		// --
+
 		// k8s.io/kubernetes/pkg/apis/storage/v1beta1
-		gvr("storage.k8s.io", "v1beta1", "csistoragecapacities"): {
-			Stub:             `{"metadata": {"name": "csc-12345-2"}, "storageClassName": "sc1"}`,
-			ExpectedEtcdPath: "/registry/csistoragecapacities/" + namespace + "/csc-12345-2",
-			ExpectedGVK:      gvkP("storage.k8s.io", "v1", "CSIStorageCapacity"),
+		gvr("storage.k8s.io", "v1beta1", "volumeattributesclasses"): {
+			Stub:             `{"metadata": {"name": "vac2"}, "driverName": "example.com/driver", "parameters": {"foo": "bar"}}`,
+			ExpectedEtcdPath: "/registry/volumeattributesclasses/vac2",
 		},
 		// --
 
@@ -356,16 +356,37 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 			Stub:             `{"metadata":{"name":"hook2","creationTimestamp":null},"webhooks":[{"name":"externaladmissionhook.k8s.io","clientConfig":{"service":{"namespace":"ns","name":"n"},"caBundle":null},"rules":[{"operations":["CREATE"],"apiGroups":["group"],"apiVersions":["version"],"resources":["resource"]}],"failurePolicy":"Ignore","sideEffects":"None","admissionReviewVersions":["v1beta1"]}]}`,
 			ExpectedEtcdPath: "/registry/mutatingwebhookconfigurations/hook2",
 		},
-		// --
-
-		// k8s.io/kubernetes/pkg/apis/admissionregistration/v1alpha1
-		gvr("admissionregistration.k8s.io", "v1alpha1", "validatingadmissionpolicies"): {
+		gvr("admissionregistration.k8s.io", "v1", "validatingadmissionpolicies"): {
 			Stub:             `{"metadata":{"name":"vap1","creationTimestamp":null},"spec":{"paramKind":{"apiVersion":"test.example.com/v1","kind":"Example"},"matchConstraints":{"resourceRules": [{"resourceNames": ["fakeName"], "apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE", "UPDATE"], "resources":["deployments"]}]},"validations":[{"expression":"object.spec.replicas <= params.maxReplicas","message":"Too many replicas"}]}}`,
 			ExpectedEtcdPath: "/registry/validatingadmissionpolicies/vap1",
 		},
-		gvr("admissionregistration.k8s.io", "v1alpha1", "validatingadmissionpolicybindings"): {
-			Stub:             `{"metadata":{"name":"pb1","creationTimestamp":null},"spec":{"policyName":"replicalimit-policy.example.com","paramRef":{"name":"replica-limit-test.example.com"},"validationActions":["Deny"]}}`,
+		gvr("admissionregistration.k8s.io", "v1", "validatingadmissionpolicybindings"): {
+			Stub:             `{"metadata":{"name":"pb1","creationTimestamp":null},"spec":{"policyName":"replicalimit-policy.example.com","paramRef":{"name":"replica-limit-test.example.com","parameterNotFoundAction":"Deny"},"validationActions":["Deny"]}}`,
 			ExpectedEtcdPath: "/registry/validatingadmissionpolicybindings/pb1",
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/admissionregistration/v1beta1
+		gvr("admissionregistration.k8s.io", "v1beta1", "validatingadmissionpolicies"): {
+			Stub:             `{"metadata":{"name":"vap1b1","creationTimestamp":null},"spec":{"paramKind":{"apiVersion":"test.example.com/v1","kind":"Example"},"matchConstraints":{"resourceRules": [{"resourceNames": ["fakeName"], "apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE", "UPDATE"], "resources":["deployments"]}]},"validations":[{"expression":"object.spec.replicas <= params.maxReplicas","message":"Too many replicas"}]}}`,
+			ExpectedEtcdPath: "/registry/validatingadmissionpolicies/vap1b1",
+			ExpectedGVK:      gvkP("admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicy"),
+		},
+		gvr("admissionregistration.k8s.io", "v1beta1", "validatingadmissionpolicybindings"): {
+			Stub:             `{"metadata":{"name":"pb1b1","creationTimestamp":null},"spec":{"policyName":"replicalimit-policy.example.com","paramRef":{"name":"replica-limit-test.example.com","parameterNotFoundAction":"Deny"},"validationActions":["Deny"]}}`,
+			ExpectedEtcdPath: "/registry/validatingadmissionpolicybindings/pb1b1",
+			ExpectedGVK:      gvkP("admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicyBinding"),
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/admissionregistration/v1alpha1
+		gvr("admissionregistration.k8s.io", "v1alpha1", "mutatingadmissionpolicies"): {
+			Stub:             `{"metadata":{"name":"map1","creationTimestamp":null},"spec":{"paramKind":{"apiVersion":"test.example.com/v1","kind":"Example"},"matchConstraints":{"resourceRules": [{"resourceNames": ["fakeName"], "apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE", "UPDATE"], "resources":["deployments"]}]},"reinvocationPolicy": "IfNeeded","mutations":[{"applyConfiguration": {"expression":"Object{metadata: Object.metadata{labels: {'example':'true'}}}"}, "patchType":"ApplyConfiguration"}]}}`,
+			ExpectedEtcdPath: "/registry/mutatingadmissionpolicies/map1",
+		},
+		gvr("admissionregistration.k8s.io", "v1alpha1", "mutatingadmissionpolicybindings"): {
+			Stub:             `{"metadata":{"name":"mpb1","creationTimestamp":null},"spec":{"policyName":"replicalimit-policy.example.com","paramRef":{"name":"replica-limit-test.example.com"}}}`,
+			ExpectedEtcdPath: "/registry/mutatingadmissionpolicybindings/mpb1",
 		},
 		// --
 
@@ -423,22 +444,45 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
-		// k8s.io/kubernetes/pkg/apis/resource/v1alpha2
-		gvr("resource.k8s.io", "v1alpha2", "resourceclasses"): {
-			Stub:             `{"metadata": {"name": "class1name"}, "driverName": "example.com"}`,
-			ExpectedEtcdPath: "/registry/resourceclasses/class1name",
+		// k8s.io/kubernetes/pkg/apis/resource/v1alpha3
+		gvr("resource.k8s.io", "v1alpha3", "deviceclasses"): {
+			Stub:             `{"metadata": {"name": "class1name"}}`,
+			ExpectedEtcdPath: "/registry/deviceclasses/class1name",
+			ExpectedGVK:      gvkP("resource.k8s.io", "v1beta1", "DeviceClass"),
 		},
-		gvr("resource.k8s.io", "v1alpha2", "resourceclaims"): {
-			Stub:             `{"metadata": {"name": "claim1name"}, "spec": {"resourceClassName": "class1name", "allocationMode": "WaitForFirstConsumer"}}`,
+		gvr("resource.k8s.io", "v1alpha3", "resourceclaims"): {
+			Stub:             `{"metadata": {"name": "claim1name"}, "spec": {"devices": {"requests": [{"name": "req-0", "deviceClassName": "example-class", "allocationMode": "ExactCount", "count": 1}]}}}`,
 			ExpectedEtcdPath: "/registry/resourceclaims/" + namespace + "/claim1name",
+			ExpectedGVK:      gvkP("resource.k8s.io", "v1beta1", "ResourceClaim"),
 		},
-		gvr("resource.k8s.io", "v1alpha2", "resourceclaimtemplates"): {
-			Stub:             `{"metadata": {"name": "claimtemplate1name"}, "spec": {"spec": {"resourceClassName": "class1name", "allocationMode": "WaitForFirstConsumer"}}}`,
+		gvr("resource.k8s.io", "v1alpha3", "resourceclaimtemplates"): {
+			Stub:             `{"metadata": {"name": "claimtemplate1name"}, "spec": {"spec": {"devices": {"requests": [{"name": "req-0", "deviceClassName": "example-class", "allocationMode": "ExactCount", "count": 1}]}}}}`,
 			ExpectedEtcdPath: "/registry/resourceclaimtemplates/" + namespace + "/claimtemplate1name",
+			ExpectedGVK:      gvkP("resource.k8s.io", "v1beta1", "ResourceClaimTemplate"),
 		},
-		gvr("resource.k8s.io", "v1alpha2", "podschedulingcontexts"): {
-			Stub:             `{"metadata": {"name": "pod1name"}, "spec": {"selectedNode": "node1name", "potentialNodes": ["node1name", "node2name"]}}`,
-			ExpectedEtcdPath: "/registry/podschedulingcontexts/" + namespace + "/pod1name",
+		gvr("resource.k8s.io", "v1alpha3", "resourceslices"): {
+			Stub:             `{"metadata": {"name": "node1slice"}, "spec": {"nodeName": "worker1", "driver": "dra.example.com", "pool": {"name": "worker1", "resourceSliceCount": 1}}}`,
+			ExpectedEtcdPath: "/registry/resourceslices/node1slice",
+			ExpectedGVK:      gvkP("resource.k8s.io", "v1beta1", "ResourceSlice"),
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/resource/v1beta1
+		gvr("resource.k8s.io", "v1beta1", "deviceclasses"): {
+			Stub:             `{"metadata": {"name": "class2name"}}`,
+			ExpectedEtcdPath: "/registry/deviceclasses/class2name",
+		},
+		gvr("resource.k8s.io", "v1beta1", "resourceclaims"): {
+			Stub:             `{"metadata": {"name": "claim2name"}, "spec": {"devices": {"requests": [{"name": "req-0", "deviceClassName": "example-class", "allocationMode": "ExactCount", "count": 1}]}}}`,
+			ExpectedEtcdPath: "/registry/resourceclaims/" + namespace + "/claim2name",
+		},
+		gvr("resource.k8s.io", "v1beta1", "resourceclaimtemplates"): {
+			Stub:             `{"metadata": {"name": "claimtemplate2name"}, "spec": {"spec": {"devices": {"requests": [{"name": "req-0", "deviceClassName": "example-class", "allocationMode": "ExactCount", "count": 1}]}}}}`,
+			ExpectedEtcdPath: "/registry/resourceclaimtemplates/" + namespace + "/claimtemplate2name",
+		},
+		gvr("resource.k8s.io", "v1beta1", "resourceslices"): {
+			Stub:             `{"metadata": {"name": "node2slice"}, "spec": {"nodeName": "worker1", "driver": "dra.example.com", "pool": {"name": "worker1", "resourceSliceCount": 1}}}`,
+			ExpectedEtcdPath: "/registry/resourceslices/node2slice",
 		},
 		// --
 
@@ -449,22 +493,46 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 		},
 		// --
 
+		// k8s.io/kubernetes/pkg/apis/storage/v1
+		gvr("storage.k8s.io", "v1", "csinodes"): {
+			Stub:             `{"metadata": {"name": "csini2"}, "spec": {"drivers": [{"name": "test-driver", "nodeID": "localhost", "topologyKeys": ["company.com/zone1", "company.com/zone2"]}]}}`,
+			ExpectedEtcdPath: "/registry/csinodes/csini2",
+		},
+		// --
+
+		// k8s.io/kubernetes/pkg/apis/storage/v1
+		gvr("storage.k8s.io", "v1", "csidrivers"): {
+			Stub:             `{"metadata": {"name": "csid2"}, "spec": {"attachRequired": true, "podInfoOnMount": true}}`,
+			ExpectedEtcdPath: "/registry/csidrivers/csid2",
+		},
+		// --
 	}
 
-	// add csinodes
-	// k8s.io/kubernetes/pkg/apis/storage/v1
-	etcdStorageData[gvr("storage.k8s.io", "v1", "csinodes")] = StorageData{
-		Stub:             `{"metadata": {"name": "csini2"}, "spec": {"drivers": [{"name": "test-driver", "nodeID": "localhost", "topologyKeys": ["company.com/zone1", "company.com/zone2"]}]}}`,
-		ExpectedEtcdPath: "/registry/csinodes/csini2",
+	// Delete types no longer served or not yet added at a particular emulated version.
+	// When adding a brand new type non-alpha type in the latest release, please ensure that
+	// it is removed in previous emulated versions otherwise emulated version tests will fail.
+	// TODO: derive this programatically from gvk --> instance --> APILifecycle info
+	switch version {
+	case "1.33":
+		delete(etcdStorageData, gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "flowschemas"))
+		delete(etcdStorageData, gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "prioritylevelconfigurations"))
+	case "1.32":
+		delete(etcdStorageData, gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "flowschemas"))
+		delete(etcdStorageData, gvr("flowcontrol.apiserver.k8s.io", "v1beta3", "prioritylevelconfigurations"))
+	case "1.31":
+		delete(etcdStorageData, gvr("resource.k8s.io", "v1beta1", "deviceclasses"))
+		delete(etcdStorageData, gvr("resource.k8s.io", "v1beta1", "resourceclaims"))
+		delete(etcdStorageData, gvr("resource.k8s.io", "v1beta1", "resourceclaimtemplates"))
+		delete(etcdStorageData, gvr("resource.k8s.io", "v1beta1", "resourceslices"))
 	}
 
-	// add csidrivers
-	// k8s.io/kubernetes/pkg/apis/storage/v1
-	etcdStorageData[gvr("storage.k8s.io", "v1", "csidrivers")] = StorageData{
-		Stub:             `{"metadata": {"name": "csid2"}, "spec": {"attachRequired": true, "podInfoOnMount": true}}`,
-		ExpectedEtcdPath: "/registry/csidrivers/csid2",
+	if removeAlphas {
+		for key := range etcdStorageData {
+			if strings.Contains(key.Version, "alpha") {
+				delete(etcdStorageData, key)
+			}
+		}
 	}
-
 	return etcdStorageData
 }
 

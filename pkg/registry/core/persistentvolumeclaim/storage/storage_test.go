@@ -62,7 +62,7 @@ func validNewPersistentVolumeClaim(name, ns string) *api.PersistentVolumeClaim {
 		},
 		Spec: api.PersistentVolumeClaimSpec{
 			AccessModes: []api.PersistentVolumeAccessMode{api.ReadWriteOnce},
-			Resources: api.ResourceRequirements{
+			Resources: api.VolumeResourceRequirements{
 				Requests: api.ResourceList{
 					api.ResourceName(api.ResourceStorage): resource.MustParse("10G"),
 				},
@@ -178,7 +178,7 @@ func TestUpdateStatus(t *testing.T) {
 		},
 		Spec: api.PersistentVolumeClaimSpec{
 			AccessModes: []api.PersistentVolumeAccessMode{api.ReadWriteOnce},
-			Resources: api.ResourceRequirements{
+			Resources: api.VolumeResourceRequirements{
 				Requests: api.ResourceList{
 					api.ResourceName(api.ResourceStorage): resource.MustParse("3Gi"),
 				},
@@ -275,7 +275,7 @@ func TestDefaultOnReadPvc(t *testing.T) {
 
 	for testName, test := range tests {
 		t.Run(testName, func(t *testing.T) {
-			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AnyVolumeDataSource, test.anyEnabled)()
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AnyVolumeDataSource, test.anyEnabled)
 			pvc := new(api.PersistentVolumeClaim)
 			if test.dataSource {
 				pvc.Spec.DataSource = dataSource.DeepCopy()

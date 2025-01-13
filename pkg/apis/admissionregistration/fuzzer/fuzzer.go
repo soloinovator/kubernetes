@@ -98,5 +98,37 @@ var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 				obj.MatchPolicy = &m
 			}
 		},
+		func(obj *admissionregistration.ParamRef, c fuzz.Continue) {
+			c.FuzzNoCustom(obj) // fuzz self without calling this function again
+
+			// Populate required field
+			if obj.ParameterNotFoundAction == nil {
+				v := admissionregistration.DenyAction
+				obj.ParameterNotFoundAction = &v
+			}
+		},
+		func(obj *admissionregistration.MutatingAdmissionPolicySpec, c fuzz.Continue) {
+			c.FuzzNoCustom(obj) // fuzz self without calling this function again
+			if obj.FailurePolicy == nil {
+				p := admissionregistration.FailurePolicyType("Fail")
+				obj.FailurePolicy = &p
+			}
+			obj.ReinvocationPolicy = admissionregistration.NeverReinvocationPolicy
+		},
+		func(obj *admissionregistration.Mutation, c fuzz.Continue) {
+			c.FuzzNoCustom(obj) // fuzz self without calling this function again
+			patchTypes := []admissionregistration.PatchType{admissionregistration.PatchTypeJSONPatch, admissionregistration.PatchTypeApplyConfiguration}
+			obj.PatchType = patchTypes[c.Rand.Intn(len(patchTypes))]
+			if obj.PatchType == admissionregistration.PatchTypeJSONPatch {
+				obj.JSONPatch = &admissionregistration.JSONPatch{}
+				c.Fuzz(&obj.JSONPatch)
+				obj.ApplyConfiguration = nil
+			}
+			if obj.PatchType == admissionregistration.PatchTypeApplyConfiguration {
+				obj.ApplyConfiguration = &admissionregistration.ApplyConfiguration{}
+				c.Fuzz(obj.ApplyConfiguration)
+				obj.JSONPatch = nil
+			}
+		},
 	}
 }

@@ -190,8 +190,78 @@ No changes
   - The type `ContainerEventResponse` updated: the field `pod_sandbox_metadata` removed and fields `pod_sandbox_status` and `containers_statuses` added.
   - The type `PodSandboxStatusResponse` has a new fields `containers_statuses` and `timestamp`
 
+### v1.27
 
+`git diff v1.26.0 v1.27.0 -- staging/src/k8s.io/cri-api/pkg/apis/runtime/v1/api.proto`
 
+- [CRI: Add CDI device info for containers](https://github.com/kubernetes/kubernetes/pull/115891/)
+  - New type `CDIDevice` was introduced and added to container config
+
+- [Add mappings for volumes](https://github.com/kubernetes/kubernetes/pull/116377)
+  - Added new fields to the type `Mount` expressing runtime UID/GID mappings for the mount.
+
+### v1.28
+
+`git diff v1.27.0 v1.28.0 -- staging/src/k8s.io/cri-api/pkg/apis/runtime/v1/api.proto`
+
+- [cri-api: fix comment lines about PROPAGATION_PRIVATE](https://github.com/kubernetes/kubernetes/pull/115704)
+  - Fixed comment lines about PROPAGATION_PRIVATE
+
+- [Add user specified image to CRI ContainerConfig](https://github.com/kubernetes/kubernetes/pull/118652)
+  - Added the `user_specified_image` field to type `ImageSpec`
+
+- [kubelet: get cgroup driver config from CRI ](https://github.com/kubernetes/kubernetes/pull/118770)
+  - Added rpc for querying runtime configuration
+  - Added cavieats about cgroup driver field
+
+- [Add swap to stats to Summary API and Prometheus endpoints (/stats/summary and /metrics/resource)](https://github.com/kubernetes/kubernetes/pull/118865)
+  - Added `SwapUsage` type
+  - Added `SwapUsage` field to `ContainerStats` type
+
+- [Expose commit memory used in WindowsMemoryUsage struct](https://github.com/kubernetes/kubernetes/pull/119238)
+  - Added the `commit_memory_bytes` field to type `WindowsMemoryUsage`
+
+### v1.29
+
+`git diff v1.28.0 v1.29.0 -- staging/src/k8s.io/cri-api/pkg/apis/runtime/v1/api.proto`
+
+- [Add runtime handler field to ImageSpec struct](https://github.com/kubernetes/kubernetes/pull/121121)
+  - Added `runtime_handler` field to type `ImageSpec`
+
+- [Add container filesystem to the ImageFsInfoResponse](https://github.com/kubernetes/kubernetes/pull/120914)
+  - Added `container_filesystems` field to type `ImageFsInfoResponse`
+
+### v1.30
+
+`git diff v1.29.0 v1.30.0 -- staging/src/k8s.io/cri-api/pkg/apis/runtime/v1/api.proto`
+
+- [Recursive Read-only (RRO) mounts](https://github.com/kubernetes/kubernetes/pull/123272)
+  - Added RuntimeHandler and RuntimeHandlerFeatures type
+  - Added `recursive_read_only` field to type `Mount`
+  - Added `runtime_handlers` field to type `StatusResponse`
+
+- [Add user_namespaces field to RuntimeHandlerFeatures](https://github.com/kubernetes/kubernetes/pull/123356)
+  - Added `user_namespaces` field to type `RuntimeHandlerFeatures`
+
+- [Add image_id to CRI Container message](https://github.com/kubernetes/kubernetes/pull/123508)
+  - Added `image_id` field to type `Container`
+
+- [Add image_id to CRI ContainerStatus message](https://github.com/kubernetes/kubernetes/pull/123583)
+  - Added `image_id` field to type `ContainerStatus`
+
+### v1.31
+
+`git diff v1.30.0 v1.31.0 -- staging/src/k8s.io/cri-api/pkg/apis/runtime/v1/api.proto`
+
+- [KEP-3619: Add NodeStatus.Features.SupplementalGroupsPolicy API and e2e](https://github.com/kubernetes/kubernetes/pull/125470)
+  - Added `features` field to the type `StatusResponse` for the runtime to kubelet handshake on what features are supported
+
+- [KEP-3619: Fine-grained SupplementalGroups control](https://github.com/kubernetes/kubernetes/pull/117842)
+  - Added `supplemental_groups_policy` field to types `LinuxContainerSecurityContext` and `LinuxSandboxSecurityContext`
+  - Added `user` field to the type `ContainerStatus` to represent actual user for the container 
+
+- [[KEP-4639] Add OCI VolumeSource CRI API](https://github.com/kubernetes/kubernetes/pull/125659)
+  - Added `image` field to the type `Mount` to represent the OCI VolumeSource 
 
 
 ## Community, discussion, contribution, and support
@@ -211,7 +281,7 @@ You can reach the maintainers of this repository at:
 Participation in the Kubernetes community is governed by the [Kubernetes
 Code of Conduct](code-of-conduct.md).
 
-### Contibution Guidelines
+### Contribution Guidelines
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information. Please note that [kubernetes/cri-api](https://github.com/kubernetes/cri-api)
 is a readonly mirror repository, all development is done at [kubernetes/kubernetes](https://github.com/kubernetes/kubernetes).

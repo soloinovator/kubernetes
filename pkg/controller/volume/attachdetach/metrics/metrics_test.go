@@ -78,7 +78,7 @@ func TestVolumesInUseMetricCollection(t *testing.T) {
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
 			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadOnlyMany, v1.ReadWriteOnce},
-			Resources: v1.ResourceRequirements{
+			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{
 					v1.ResourceName(v1.ResourceStorage): resource.MustParse("2G"),
 				},
@@ -147,7 +147,7 @@ func TestTotalVolumesMetricCollection(t *testing.T) {
 	volumeSpec := controllervolumetesting.GetTestVolumeSpec(string(volumeName), volumeName)
 	nodeName := k8stypes.NodeName("node-name")
 
-	dsw.AddNode(nodeName, false)
+	dsw.AddNode(nodeName)
 	_, err := dsw.AddPod(types.UniquePodName(podName), controllervolumetesting.NewPod(podName, podName), volumeSpec, nodeName)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)

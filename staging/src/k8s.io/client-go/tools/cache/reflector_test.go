@@ -21,12 +21,18 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"reflect"
 	goruntime "runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -39,6 +45,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/klog/v2/ktesting"
 	"k8s.io/utils/clock"
 	testingclock "k8s.io/utils/clock/testing"
 )
@@ -58,6 +65,7 @@ func (t *testLW) Watch(options metav1.ListOptions) (watch.Interface, error) {
 }
 
 func TestCloseWatchChannelOnError(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
 	r := NewReflector(&testLW{}, &v1.Pod{}, NewStore(MetaNamespaceKeyFunc), 0)
 	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}
 	fw := watch.NewFake()
@@ -69,7 +77,7 @@ func TestCloseWatchChannelOnError(t *testing.T) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
 		},
 	}
-	go r.ListAndWatch(wait.NeverStop)
+	go func() { assert.NoError(t, r.ListAndWatchWithContext(ctx)) }()
 	fw.Error(pod)
 	select {
 	case _, ok := <-fw.ResultChan():
@@ -83,7 +91,8 @@ func TestCloseWatchChannelOnError(t *testing.T) {
 }
 
 func TestRunUntil(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
 	store := NewStore(MetaNamespaceKeyFunc)
 	r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
 	fw := watch.NewFake()
@@ -95,19 +104,35 @@ func TestRunUntil(t *testing.T) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
 		},
 	}
-	go r.Run(stopCh)
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		r.RunWithContext(ctx)
+	}()
 	// Synchronously add a dummy pod into the watch channel so we
 	// know the RunUntil go routine is in the watch handler.
 	fw.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bar"}})
-	close(stopCh)
-	select {
-	case _, ok := <-fw.ResultChan():
-		if ok {
-			t.Errorf("Watch channel left open after stopping the watch")
+
+	cancel(errors.New("done"))
+	resultCh := fw.ResultChan()
+	for {
+		select {
+		case <-doneCh:
+			if resultCh == nil {
+				return // both closed
+			}
+			doneCh = nil
+		case _, ok := <-resultCh:
+			if ok {
+				t.Fatalf("Watch channel left open after stopping the watch")
+			}
+			if doneCh == nil {
+				return // both closed
+			}
+			resultCh = nil
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Fatalf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
 		}
-	case <-time.After(wait.ForeverTestTimeout):
-		t.Errorf("the cancellation is at least %s late", wait.ForeverTestTimeout.String())
-		break
 	}
 }
 
@@ -124,6 +149,63 @@ func TestReflectorResyncChan(t *testing.T) {
 	}
 }
 
+// TestReflectorWatchStoppedBefore ensures that neither List nor Watch are
+// called if the stop channel is closed before Reflector.watch is called.
+func TestReflectorWatchStoppedBefore(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	cancel(errors.New("don't run"))
+
+	lw := &ListWatch{
+		ListFunc: func(_ metav1.ListOptions) (runtime.Object, error) {
+			t.Fatal("ListFunc called unexpectedly")
+			return nil, nil
+		},
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			// If WatchFunc is never called, the watcher it returns doesn't need to be stopped.
+			t.Fatal("WatchFunc called unexpectedly")
+			return nil, nil
+		},
+	}
+	target := NewReflector(lw, &v1.Pod{}, nil, 0)
+
+	err := target.watch(ctx, nil, nil)
+	require.NoError(t, err)
+}
+
+// TestReflectorWatchStoppedAfter ensures that neither the watcher is stopped if
+// the stop channel is closed after Reflector.watch has started watching.
+func TestReflectorWatchStoppedAfter(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+
+	var watchers []*watch.FakeWatcher
+
+	lw := &ListWatch{
+		ListFunc: func(_ metav1.ListOptions) (runtime.Object, error) {
+			t.Fatal("ListFunc called unexpectedly")
+			return nil, nil
+		},
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			// Simulate the stop channel being closed after watching has started
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				cancel(errors.New("10ms timeout reached"))
+			}()
+			// Use a fake watcher that never sends events
+			w := watch.NewFake()
+			watchers = append(watchers, w)
+			return w, nil
+		},
+	}
+	target := NewReflector(lw, &v1.Pod{}, nil, 0)
+
+	err := target.watch(ctx, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, watchers, 1)
+	require.True(t, watchers[0].IsStopped())
+}
+
 func BenchmarkReflectorResyncChanMany(b *testing.B) {
 	s := NewStore(MetaNamespaceKeyFunc)
 	g := NewReflector(&testLW{}, &v1.Pod{}, s, 25*time.Millisecond)
@@ -136,22 +218,153 @@ func BenchmarkReflectorResyncChanMany(b *testing.B) {
 	}
 }
 
-func TestReflectorWatchHandlerError(t *testing.T) {
+// TestReflectorHandleWatchStoppedBefore ensures that handleWatch stops when
+// stopCh is already closed before handleWatch was called. It also ensures that
+// ResultChan is only called once and that Stop is called after ResultChan.
+func TestReflectorHandleWatchStoppedBefore(t *testing.T) {
 	s := NewStore(MetaNamespaceKeyFunc)
 	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
-	fw := watch.NewFake()
-	go func() {
-		fw.Stop()
-	}()
-	err := watchHandler(time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, nil, g.clock, nevererrc, wait.NeverStop)
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	// Simulate the context being canceled before the watchHandler is called
+	cancel(errors.New("don't run"))
+	var calls []string
+	resultCh := make(chan watch.Event)
+	fw := watch.MockWatcher{
+		StopFunc: func() {
+			calls = append(calls, "Stop")
+			close(resultCh)
+		},
+		ResultChanFunc: func() <-chan watch.Event {
+			calls = append(calls, "ResultChan")
+			return resultCh
+		},
+	}
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, g.clock, nevererrc)
 	if err == nil {
 		t.Errorf("unexpected non-error")
 	}
+	// Ensure the watcher methods are called exactly once in this exact order.
+	// TODO(karlkfi): Fix watchHandler to call Stop()
+	// assert.Equal(t, []string{"ResultChan", "Stop"}, calls)
+	assert.Equal(t, []string{"ResultChan"}, calls)
+}
+
+// TestReflectorHandleWatchStoppedAfter ensures that handleWatch stops when
+// stopCh is closed after handleWatch was called. It also ensures that
+// ResultChan is only called once and that Stop is called after ResultChan.
+func TestReflectorHandleWatchStoppedAfter(t *testing.T) {
+	s := NewStore(MetaNamespaceKeyFunc)
+	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
+	var calls []string
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	resultCh := make(chan watch.Event)
+	fw := watch.MockWatcher{
+		StopFunc: func() {
+			calls = append(calls, "Stop")
+			close(resultCh)
+		},
+		ResultChanFunc: func() <-chan watch.Event {
+			calls = append(calls, "ResultChan")
+			resultCh = make(chan watch.Event)
+			// Simulate the watch handler being stopped asynchronously by the
+			// caller, after watching has started.
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				cancel(errors.New("10ms timeout reached"))
+			}()
+			return resultCh
+		},
+	}
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, g.clock, nevererrc)
+	if err == nil {
+		t.Errorf("unexpected non-error")
+	}
+	// Ensure the watcher methods are called exactly once in this exact order.
+	// TODO(karlkfi): Fix watchHandler to call Stop()
+	// assert.Equal(t, []string{"ResultChan", "Stop"}, calls)
+	assert.Equal(t, []string{"ResultChan"}, calls)
+}
+
+// TestReflectorHandleWatchResultChanClosedBefore ensures that handleWatch
+// stops when the result channel is closed before handleWatch was called.
+func TestReflectorHandleWatchResultChanClosedBefore(t *testing.T) {
+	s := NewStore(MetaNamespaceKeyFunc)
+	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
+	_, ctx := ktesting.NewTestContext(t)
+	var calls []string
+	resultCh := make(chan watch.Event)
+	fw := watch.MockWatcher{
+		StopFunc: func() {
+			calls = append(calls, "Stop")
+		},
+		ResultChanFunc: func() <-chan watch.Event {
+			calls = append(calls, "ResultChan")
+			return resultCh
+		},
+	}
+	// Simulate the result channel being closed by the producer before handleWatch is called.
+	close(resultCh)
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, g.clock, nevererrc)
+	if err == nil {
+		t.Errorf("unexpected non-error")
+	}
+	// Ensure the watcher methods are called exactly once in this exact order.
+	// TODO(karlkfi): Fix watchHandler to call Stop()
+	// assert.Equal(t, []string{"ResultChan", "Stop"}, calls)
+	assert.Equal(t, []string{"ResultChan"}, calls)
+}
+
+// TestReflectorHandleWatchResultChanClosedAfter ensures that handleWatch
+// stops when the result channel is closed after handleWatch has started watching.
+func TestReflectorHandleWatchResultChanClosedAfter(t *testing.T) {
+	s := NewStore(MetaNamespaceKeyFunc)
+	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
+	_, ctx := ktesting.NewTestContext(t)
+	var calls []string
+	resultCh := make(chan watch.Event)
+	fw := watch.MockWatcher{
+		StopFunc: func() {
+			calls = append(calls, "Stop")
+		},
+		ResultChanFunc: func() <-chan watch.Event {
+			calls = append(calls, "ResultChan")
+			resultCh = make(chan watch.Event)
+			// Simulate the result channel being closed by the producer, after
+			// watching has started.
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				close(resultCh)
+			}()
+			return resultCh
+		},
+	}
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, g.clock, nevererrc)
+	if err == nil {
+		t.Errorf("unexpected non-error")
+	}
+	// Ensure the watcher methods are called exactly once in this exact order.
+	// TODO(karlkfi): Fix watchHandler to call Stop()
+	// assert.Equal(t, []string{"ResultChan", "Stop"}, calls)
+	assert.Equal(t, []string{"ResultChan"}, calls)
 }
 
 func TestReflectorWatchHandler(t *testing.T) {
 	s := NewStore(MetaNamespaceKeyFunc)
 	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
+	// Wrap setLastSyncResourceVersion so we can tell the watchHandler to stop
+	// watching after all the events have been consumed. This avoids race
+	// conditions which can happen if the producer calls Stop(), instead of the
+	// consumer.
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	setLastSyncResourceVersion := func(rv string) {
+		g.setLastSyncResourceVersion(rv)
+		if rv == "32" {
+			cancel(errors.New("LastSyncResourceVersion is 32"))
+		}
+	}
 	fw := watch.NewFake()
 	s.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "foo"}})
 	s.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bar"}})
@@ -162,8 +375,9 @@ func TestReflectorWatchHandler(t *testing.T) {
 		fw.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "baz", ResourceVersion: "32"}})
 		fw.Stop()
 	}()
-	err := watchHandler(time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, nil, g.clock, nevererrc, wait.NeverStop)
-	if err != nil {
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, setLastSyncResourceVersion, g.clock, nevererrc)
+	// TODO(karlkfi): Fix FakeWatcher to avoid race condition between watcher.Stop() & close(stopCh)
+	if err != nil && !errors.Is(err, errorStopRequested) {
 		t.Errorf("unexpected error %v", err)
 	}
 
@@ -171,6 +385,7 @@ func TestReflectorWatchHandler(t *testing.T) {
 		return &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: id, ResourceVersion: rv}}
 	}
 
+	// Validate that the Store was updated by the events
 	table := []struct {
 		Pod    *v1.Pod
 		exists bool
@@ -193,12 +408,7 @@ func TestReflectorWatchHandler(t *testing.T) {
 		}
 	}
 
-	// RV should send the last version we see.
-	if e, a := "32", g.LastSyncResourceVersion(); e != a {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-
-	// last sync resource version should be the last version synced with store
+	// Validate that setLastSyncResourceVersion was called with the RV from the last event.
 	if e, a := "32", g.LastSyncResourceVersion(); e != a {
 		t.Errorf("expected %v, got %v", e, a)
 	}
@@ -208,15 +418,19 @@ func TestReflectorStopWatch(t *testing.T) {
 	s := NewStore(MetaNamespaceKeyFunc)
 	g := NewReflector(&testLW{}, &v1.Pod{}, s, 0)
 	fw := watch.NewFake()
-	stopWatch := make(chan struct{}, 1)
-	stopWatch <- struct{}{}
-	err := watchHandler(time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, nil, g.clock, nevererrc, stopWatch)
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	cancel(errors.New("don't run"))
+	err := handleWatch(ctx, time.Now(), fw, s, g.expectedType, g.expectedGVK, g.name, g.typeDescription, g.setLastSyncResourceVersion, g.clock, nevererrc)
 	if err != errorStopRequested {
 		t.Errorf("expected stop error, got %q", err)
 	}
 }
 
 func TestReflectorListAndWatch(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	createdFakes := make(chan *watch.FakeWatcher)
 
 	// The ListFunc says that it's at revision 1. Therefore, we expect our WatchFunc
@@ -242,7 +456,7 @@ func TestReflectorListAndWatch(t *testing.T) {
 	}
 	s := NewFIFO(MetaNamespaceKeyFunc)
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
-	go r.ListAndWatch(wait.NeverStop)
+	go func() { assert.NoError(t, r.ListAndWatchWithContext(ctx)) }()
 
 	ids := []string{"foo", "bar", "baz", "qux", "zoo"}
 	var fw *watch.FakeWatcher
@@ -339,6 +553,8 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 			}
 		}
 		watchRet, watchErr := item.events, item.watchErr
+		_, ctx := ktesting.NewTestContext(t)
+		ctx, cancel := context.WithCancelCause(ctx)
 		lw := &testLW{
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				if watchErr != nil {
@@ -350,7 +566,13 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 					for _, e := range watchRet {
 						fw.Action(e.Type, e.Object)
 					}
-					fw.Stop()
+					// Because FakeWatcher doesn't buffer events, it's safe to
+					// close the stop channel immediately without missing events.
+					// But usually, the event producer would instead close the
+					// result channel, and wait for the consumer to stop the
+					// watcher, to avoid race conditions.
+					// TODO: Fix the FakeWatcher to separate watcher.Stop from close(resultCh)
+					cancel(errors.New("done"))
 				}()
 				return fw, nil
 			},
@@ -359,7 +581,16 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 			},
 		}
 		r := NewReflector(lw, &v1.Pod{}, s, 0)
-		r.ListAndWatch(wait.NeverStop)
+		err := r.ListAndWatchWithContext(ctx)
+		if item.listErr != nil && !errors.Is(err, item.listErr) {
+			t.Errorf("unexpected ListAndWatch error: %v", err)
+		}
+		if item.watchErr != nil && !errors.Is(err, item.watchErr) {
+			t.Errorf("unexpected ListAndWatch error: %v", err)
+		}
+		if item.listErr == nil && item.watchErr == nil {
+			assert.NoError(t, err)
+		}
 	}
 }
 
@@ -377,7 +608,8 @@ func TestReflectorListAndWatchInitConnBackoff(t *testing.T) {
 	for _, test := range table {
 		t.Run(fmt.Sprintf("%d connection failures takes at least %d ms", test.numConnFails, 1<<test.numConnFails),
 			func(t *testing.T) {
-				stopCh := make(chan struct{})
+				_, ctx := ktesting.NewTestContext(t)
+				ctx, cancel := context.WithCancelCause(ctx)
 				connFails := test.numConnFails
 				fakeClock := testingclock.NewFakeClock(time.Unix(0, 0))
 				bm := wait.NewExponentialBackoffManager(time.Millisecond, maxBackoff, 100*time.Millisecond, 2.0, 1.0, fakeClock)
@@ -408,7 +640,7 @@ func TestReflectorListAndWatchInitConnBackoff(t *testing.T) {
 							connFails--
 							return nil, syscall.ECONNREFUSED
 						}
-						close(stopCh)
+						cancel(errors.New("done"))
 						return watch.NewFake(), nil
 					},
 					ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
@@ -421,10 +653,10 @@ func TestReflectorListAndWatchInitConnBackoff(t *testing.T) {
 					store:             NewFIFO(MetaNamespaceKeyFunc),
 					backoffManager:    bm,
 					clock:             fakeClock,
-					watchErrorHandler: WatchErrorHandler(DefaultWatchErrorHandler),
+					watchErrorHandler: WatchErrorHandlerWithContext(DefaultWatchErrorHandler),
 				}
 				start := fakeClock.Now()
-				err := r.ListAndWatch(stopCh)
+				err := r.ListAndWatchWithContext(ctx)
 				elapsed := fakeClock.Since(start)
 				if err != nil {
 					t.Errorf("unexpected error %v", err)
@@ -450,6 +682,7 @@ func (f *fakeBackoff) Backoff() clock.Timer {
 }
 
 func TestBackoffOnTooManyRequests(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
 	err := apierrors.NewTooManyRequests("too many requests", 1)
 	clock := &clock.RealClock{}
 	bm := &fakeBackoff{clock: clock}
@@ -481,14 +714,61 @@ func TestBackoffOnTooManyRequests(t *testing.T) {
 		store:             NewFIFO(MetaNamespaceKeyFunc),
 		backoffManager:    bm,
 		clock:             clock,
-		watchErrorHandler: WatchErrorHandler(DefaultWatchErrorHandler),
+		watchErrorHandler: WatchErrorHandlerWithContext(DefaultWatchErrorHandler),
 	}
 
 	stopCh := make(chan struct{})
-	r.ListAndWatch(stopCh)
+	if err := r.ListAndWatchWithContext(ctx); err != nil {
+		t.Fatal(err)
+	}
 	close(stopCh)
 	if bm.calls != 2 {
 		t.Errorf("unexpected watch backoff calls: %d", bm.calls)
+	}
+}
+
+func TestNoRelistOnTooManyRequests(t *testing.T) {
+	err := apierrors.NewTooManyRequests("too many requests", 1)
+	clock := &clock.RealClock{}
+	bm := &fakeBackoff{clock: clock}
+	listCalls, watchCalls := 0, 0
+
+	lw := &testLW{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			listCalls++
+			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			watchCalls++
+			if watchCalls < 5 {
+				return nil, err
+			}
+			w := watch.NewFake()
+			w.Stop()
+			return w, nil
+		},
+	}
+
+	r := &Reflector{
+		name:              "test-reflector",
+		listerWatcher:     lw,
+		store:             NewFIFO(MetaNamespaceKeyFunc),
+		backoffManager:    bm,
+		clock:             clock,
+		watchErrorHandler: WatchErrorHandlerWithContext(DefaultWatchErrorHandler),
+	}
+
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
+	if err := r.ListAndWatchWithContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancel(errors.New("done"))
+	if listCalls != 1 {
+		t.Errorf("unexpected list calls: %d", listCalls)
+	}
+	if watchCalls != 5 {
+		t.Errorf("unexpected watch calls: %d", watchCalls)
 	}
 }
 
@@ -550,14 +830,15 @@ func TestRetryInternalError(t *testing.T) {
 			store:             NewFIFO(MetaNamespaceKeyFunc),
 			backoffManager:    bm,
 			clock:             fakeClock,
-			watchErrorHandler: WatchErrorHandler(DefaultWatchErrorHandler),
+			watchErrorHandler: WatchErrorHandlerWithContext(DefaultWatchErrorHandler),
 		}
 
 		r.MaxInternalErrorRetryDuration = tc.maxInternalDuration
 
-		stopCh := make(chan struct{})
-		r.ListAndWatch(stopCh)
-		close(stopCh)
+		_, ctx := ktesting.NewTestContext(t)
+		ctx, cancel := context.WithCancelCause(ctx)
+		require.NoError(t, r.ListAndWatchWithContext(ctx))
+		cancel(errors.New("done"))
 
 		if counter-1 != tc.wantRetries {
 			t.Errorf("%v unexpected number of retries: %d", tc, counter-1)
@@ -567,7 +848,7 @@ func TestRetryInternalError(t *testing.T) {
 
 func TestReflectorResync(t *testing.T) {
 	iteration := 0
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
 	rerr := errors.New("expected resync reached")
 	s := &FakeCustomStore{
 		ResyncFunc: func() error {
@@ -590,7 +871,7 @@ func TestReflectorResync(t *testing.T) {
 	}
 	resyncPeriod := 1 * time.Millisecond
 	r := NewReflector(lw, &v1.Pod{}, s, resyncPeriod)
-	if err := r.ListAndWatch(stopCh); err != nil {
+	if err := r.ListAndWatchWithContext(ctx); err != nil {
 		// error from Resync is not propaged up to here.
 		t.Errorf("expected error %v", err)
 	}
@@ -600,13 +881,14 @@ func TestReflectorResync(t *testing.T) {
 }
 
 func TestReflectorWatchListPageSize(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
 	s := NewStore(MetaNamespaceKeyFunc)
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -636,7 +918,7 @@ func TestReflectorWatchListPageSize(t *testing.T) {
 	r.setLastSyncResourceVersion("10")
 	// Set the reflector to paginate the list request in 4 item chunks.
 	r.WatchListPageSize = 4
-	r.ListAndWatch(stopCh)
+	require.NoError(t, r.ListAndWatchWithContext(ctx))
 
 	results := s.List()
 	if len(results) != 10 {
@@ -645,13 +927,14 @@ func TestReflectorWatchListPageSize(t *testing.T) {
 }
 
 func TestReflectorNotPaginatingNotConsistentReads(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
 	s := NewStore(MetaNamespaceKeyFunc)
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -671,7 +954,7 @@ func TestReflectorNotPaginatingNotConsistentReads(t *testing.T) {
 	}
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
 	r.setLastSyncResourceVersion("10")
-	r.ListAndWatch(stopCh)
+	require.NoError(t, r.ListAndWatchWithContext(ctx))
 
 	results := s.List()
 	if len(results) != 10 {
@@ -680,13 +963,14 @@ func TestReflectorNotPaginatingNotConsistentReads(t *testing.T) {
 }
 
 func TestReflectorPaginatingNonConsistentReadsIfWatchCacheDisabled(t *testing.T) {
-	var stopCh chan struct{}
+	_, ctx := ktesting.NewTestContext(t)
+	var cancel func(error)
 	s := NewStore(MetaNamespaceKeyFunc)
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -715,16 +999,17 @@ func TestReflectorPaginatingNonConsistentReadsIfWatchCacheDisabled(t *testing.T)
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
 
 	// Initial list should initialize paginatedResult in the reflector.
-	stopCh = make(chan struct{})
-	r.ListAndWatch(stopCh)
+	var cancelCtx context.Context
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 	if results := s.List(); len(results) != 10 {
 		t.Errorf("Expected 10 results, got %d", len(results))
 	}
 
 	// Since initial list for ResourceVersion="0" was paginated, the subsequent
 	// ones should also be paginated.
-	stopCh = make(chan struct{})
-	r.ListAndWatch(stopCh)
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 	if results := s.List(); len(results) != 10 {
 		t.Errorf("Expected 10 results, got %d", len(results))
 	}
@@ -734,14 +1019,15 @@ func TestReflectorPaginatingNonConsistentReadsIfWatchCacheDisabled(t *testing.T)
 // it in relist requests to prevent the reflector from traveling back in time if the relist is to a api-server or
 // etcd that is partitioned and serving older data than the reflector has already processed.
 func TestReflectorResyncWithResourceVersion(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	cancelCtx, cancel := context.WithCancelCause(ctx)
 	s := NewStore(MetaNamespaceKeyFunc)
 	listCallRVs := []string{}
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -765,7 +1051,7 @@ func TestReflectorResyncWithResourceVersion(t *testing.T) {
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
 
 	// Initial list should use RV=0
-	r.ListAndWatch(stopCh)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 
 	results := s.List()
 	if len(results) != 4 {
@@ -773,8 +1059,8 @@ func TestReflectorResyncWithResourceVersion(t *testing.T) {
 	}
 
 	// relist should use lastSyncResourceVersions (RV=10)
-	stopCh = make(chan struct{})
-	r.ListAndWatch(stopCh)
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 
 	results = s.List()
 	if len(results) != 8 {
@@ -793,14 +1079,16 @@ func TestReflectorResyncWithResourceVersion(t *testing.T) {
 // (In kubernetes 1.17, or when the watch cache is enabled, the List will instead return the list that is no older than
 // the requested ResourceVersion).
 func TestReflectorExpiredExactResourceVersion(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	var cancelCtx context.Context
+	var cancel func(error)
 	s := NewStore(MetaNamespaceKeyFunc)
 	listCallRVs := []string{}
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -827,7 +1115,8 @@ func TestReflectorExpiredExactResourceVersion(t *testing.T) {
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
 
 	// Initial list should use RV=0
-	r.ListAndWatch(stopCh)
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 
 	results := s.List()
 	if len(results) != 4 {
@@ -835,8 +1124,8 @@ func TestReflectorExpiredExactResourceVersion(t *testing.T) {
 	}
 
 	// relist should use lastSyncResourceVersions (RV=10) and since RV=10 is expired, it should retry with RV="".
-	stopCh = make(chan struct{})
-	r.ListAndWatch(stopCh)
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	require.NoError(t, r.ListAndWatchWithContext(cancelCtx))
 
 	results = s.List()
 	if len(results) != 8 {
@@ -850,14 +1139,16 @@ func TestReflectorExpiredExactResourceVersion(t *testing.T) {
 }
 
 func TestReflectorFullListIfExpired(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	var cancelCtx context.Context
+	var cancel func(error)
 	s := NewStore(MetaNamespaceKeyFunc)
 	listCallRVs := []string{}
 
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -894,7 +1185,8 @@ func TestReflectorFullListIfExpired(t *testing.T) {
 	r.WatchListPageSize = 4
 
 	// Initial list should use RV=0
-	if err := r.ListAndWatch(stopCh); err != nil {
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	if err := r.ListAndWatchWithContext(cancelCtx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -904,8 +1196,8 @@ func TestReflectorFullListIfExpired(t *testing.T) {
 	}
 
 	// relist should use lastSyncResourceVersions (RV=10) and since second page of that expired, it should full list with RV=10
-	stopCh = make(chan struct{})
-	if err := r.ListAndWatch(stopCh); err != nil {
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	if err := r.ListAndWatchWithContext(cancelCtx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -921,7 +1213,9 @@ func TestReflectorFullListIfExpired(t *testing.T) {
 }
 
 func TestReflectorFullListIfTooLarge(t *testing.T) {
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	var cancelCtx context.Context
+	var cancel func(error)
 	s := NewStore(MetaNamespaceKeyFunc)
 	listCallRVs := []string{}
 	version := 30
@@ -929,7 +1223,7 @@ func TestReflectorFullListIfTooLarge(t *testing.T) {
 	lw := &testLW{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			// Stop once the reflector begins watching since we're only interested in the list.
-			close(stopCh)
+			cancel(errors.New("done"))
 			fw := watch.NewFake()
 			return fw, nil
 		},
@@ -967,7 +1261,8 @@ func TestReflectorFullListIfTooLarge(t *testing.T) {
 	r := NewReflector(lw, &v1.Pod{}, s, 0)
 
 	// Initial list should use RV=0
-	if err := r.ListAndWatch(stopCh); err != nil {
+	cancelCtx, cancel = context.WithCancelCause(ctx)
+	if err := r.ListAndWatchWithContext(cancelCtx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -979,8 +1274,8 @@ func TestReflectorFullListIfTooLarge(t *testing.T) {
 	// done we simply try to relist from now to avoid continuous errors on relists.
 	for i := 1; i <= 3; i++ {
 		// relist twice to cover the two variants of TooLargeResourceVersion api errors
-		stopCh = make(chan struct{})
-		if err := r.ListAndWatch(stopCh); err != nil {
+		cancelCtx, cancel = context.WithCancelCause(ctx)
+		if err := r.ListAndWatchWithContext(cancelCtx); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1069,6 +1364,68 @@ func TestGetExpectedGVKFromObject(t *testing.T) {
 	}
 }
 
+func TestWatchTimeout(t *testing.T) {
+
+	testCases := []struct {
+		name                      string
+		minWatchTimeout           time.Duration
+		expectedMinTimeoutSeconds int64
+	}{
+		{
+			name:                      "no timeout",
+			expectedMinTimeoutSeconds: 5 * 60,
+		},
+		{
+			name:                      "small timeout not honored",
+			minWatchTimeout:           time.Second,
+			expectedMinTimeoutSeconds: 5 * 60,
+		},
+		{
+			name:                      "30m timeout",
+			minWatchTimeout:           30 * time.Minute,
+			expectedMinTimeoutSeconds: 30 * 60,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ctx := ktesting.NewTestContext(t)
+			ctx, cancel := context.WithCancelCause(ctx)
+			s := NewStore(MetaNamespaceKeyFunc)
+			var gotTimeoutSeconds int64
+
+			lw := &testLW{
+				ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+					return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "10"}}, nil
+				},
+				WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+					if options.TimeoutSeconds != nil {
+						gotTimeoutSeconds = *options.TimeoutSeconds
+					}
+
+					// Stop once the reflector begins watching since we're only interested in the list.
+					cancel(errors.New("done"))
+					return watch.NewFake(), nil
+				},
+			}
+
+			opts := ReflectorOptions{
+				MinWatchTimeout: tc.minWatchTimeout,
+			}
+			r := NewReflectorWithOptions(lw, &v1.Pod{}, s, opts)
+			if err := r.ListAndWatchWithContext(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			minExpected := tc.expectedMinTimeoutSeconds
+			maxExpected := 2 * tc.expectedMinTimeoutSeconds
+			if gotTimeoutSeconds < minExpected || gotTimeoutSeconds > maxExpected {
+				t.Errorf("unexpected TimeoutSecond, got %v, expected in [%v, %v]", gotTimeoutSeconds, minExpected, maxExpected)
+			}
+		})
+	}
+}
+
 type storeWithRV struct {
 	Store
 
@@ -1089,7 +1446,8 @@ func newStoreWithRV() *storeWithRV {
 func TestReflectorResourceVersionUpdate(t *testing.T) {
 	s := newStoreWithRV()
 
-	stopCh := make(chan struct{})
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancelCause(ctx)
 	fw := watch.NewFake()
 
 	lw := &testLW{
@@ -1111,11 +1469,11 @@ func TestReflectorResourceVersionUpdate(t *testing.T) {
 		fw.Action(watch.Modified, makePod("20"))
 		fw.Action(watch.Bookmark, makePod("30"))
 		fw.Action(watch.Deleted, makePod("40"))
-		close(stopCh)
+		cancel(errors.New("done"))
 	}()
 
 	// Initial list should use RV=0
-	if err := r.ListAndWatch(stopCh); err != nil {
+	if err := r.ListAndWatchWithContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1357,6 +1715,7 @@ func (t *TestPagingPodsLW) Watch(options metav1.ListOptions) (watch.Interface, e
 }
 
 func TestReflectorListExtract(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
 	store := NewStore(func(obj interface{}) (string, error) {
 		pod, ok := obj.(*v1.Pod)
 		if !ok {
@@ -1370,8 +1729,7 @@ func TestReflectorListExtract(t *testing.T) {
 	reflector.WatchListPageSize = fakeItemsNum
 
 	// execute list to fill store
-	stopCh := make(chan struct{})
-	if err := reflector.list(stopCh); err != nil {
+	if err := reflector.list(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1431,6 +1789,152 @@ func TestReflectorListExtract(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestReflectorReplacesStoreOnUnsafeDelete(t *testing.T) {
+	mkPod := func(id string, rv string) *v1.Pod {
+		return &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: id, ResourceVersion: rv}}
+	}
+	mkList := func(rv string, pods ...*v1.Pod) *v1.PodList {
+		list := &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: rv}}
+		for _, pod := range pods {
+			list.Items = append(list.Items, *pod)
+		}
+		return list
+	}
+	makeStatus := func() *metav1.Status {
+		return &metav1.Status{
+			Status:  metav1.StatusFailure,
+			Code:    http.StatusInternalServerError,
+			Reason:  metav1.StatusReasonStoreReadError,
+			Message: "failed to prepare current and previous objects: corrupt object has been deleted",
+		}
+	}
+
+	// these pods preexist and never get updated/deleted
+	preExisting := mkPod("foo-1", "1")
+	pods := []*v1.Pod{preExisting, mkPod("foo-2", "2"), mkPod("foo-3", "3")}
+	lastExpectedRV := "5"
+	lists := []*v1.PodList{
+		mkList("3", pods...),            // initial list
+		mkList(lastExpectedRV, pods...), // re-list due to watch error
+	}
+	corruptObj := mkPod("foo", "4")
+	events := []watch.Event{
+		{Type: watch.Added, Object: corruptObj},
+		// the object becomes corrupt, and it gets unsafe-deleted, and
+		// watch sends the following Error event, note the RV has
+		// advanced to "5" in the storage due to the delete operation
+		{Type: watch.Error, Object: makeStatus()},
+	}
+
+	s := NewFIFO(MetaNamespaceKeyFunc)
+	var replaceInvoked atomic.Int32
+	store := &fakeStore{
+		Store: s,
+		beforeReplace: func(list []interface{}, rv string) {
+			// interested in the Replace call that happens after the Error event
+			if rv == lastExpectedRV {
+				replaceInvoked.Add(1)
+				_, exists, err := s.Get(corruptObj)
+				if err != nil || !exists {
+					t.Errorf("expected the object to exist in the store, exists: %t, err: %v", exists, err)
+				}
+				_, exists, err = s.Get(preExisting)
+				if err != nil || !exists {
+					t.Errorf("expected the pre-existing object to be in the store, exists: %t, err: %v", exists, err)
+				}
+			}
+		},
+		afterReplace: func(rv string, err error) {
+			if rv == lastExpectedRV {
+				replaceInvoked.Add(1)
+				if err != nil {
+					t.Errorf("expected Replace to have succeeded, but got error: %v", err)
+				}
+				_, exists, err := s.Get(corruptObj)
+				if err != nil || exists {
+					t.Errorf("expected the object to have been removed from the store, exists: %t, err: %v", exists, err)
+				}
+				// show that a pre-existing pod is still in the cache
+				_, exists, err = s.Get(preExisting)
+				if err != nil || !exists {
+					t.Errorf("expected the pre-existing object to be in the store, exists: %t, err: %v", exists, err)
+				}
+			}
+		},
+	}
+
+	var once sync.Once
+	lw := &testLW{
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			fw := watch.NewFake()
+			go func() {
+				once.Do(func() {
+					for _, e := range events {
+						fw.Action(e.Type, e.Object)
+					}
+				})
+			}()
+			return fw, nil
+		},
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			var list runtime.Object
+			if len(lists) > 0 {
+				list = lists[0]
+				lists = lists[1:]
+			}
+			return list, nil
+		},
+	}
+
+	r := NewReflector(lw, &v1.Pod{}, store, 0)
+	doneCh, stopCh := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		r.Run(stopCh)
+	}()
+
+	// wait for the RV to sync to the version returned by the final list
+	err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, wait.ForeverTestTimeout, true, func(ctx context.Context) (done bool, err error) {
+		if rv := r.LastSyncResourceVersion(); rv == lastExpectedRV {
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("reflector never caught up with expected revision: %q, err: %v", lastExpectedRV, err)
+	}
+
+	if want, got := lastExpectedRV, r.LastSyncResourceVersion(); want != got {
+		t.Errorf("expected LastSyncResourceVersion to be %q, but got: %q", want, got)
+	}
+	if want, got := 2, int(replaceInvoked.Load()); want != got {
+		t.Errorf("expected store Delete hooks to be invoked %d times, but got: %d", want, got)
+	}
+	if want, got := len(pods), len(s.List()); want != got {
+		t.Errorf("expected the store to have %d objects, but got: %d", want, got)
+	}
+
+	close(stopCh)
+	select {
+	case <-doneCh:
+	case <-time.After(wait.ForeverTestTimeout):
+		t.Errorf("timed out waiting for Run to return")
+	}
+}
+
+type fakeStore struct {
+	Store
+	beforeReplace func(list []interface{}, s string)
+	afterReplace  func(rv string, err error)
+}
+
+func (f *fakeStore) Replace(list []interface{}, rv string) error {
+	f.beforeReplace(list, rv)
+	err := f.Store.Replace(list, rv)
+	f.afterReplace(rv, err)
+	return err
 }
 
 func BenchmarkExtractList(b *testing.B) {
@@ -1605,7 +2109,7 @@ func BenchmarkReflectorList(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				err := reflector.list(ctx.Done())
+				err := reflector.list(ctx)
 				if err != nil {
 					b.Fatalf("reflect list: %v", err)
 				}

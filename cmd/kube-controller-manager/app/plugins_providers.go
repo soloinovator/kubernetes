@@ -1,6 +1,3 @@
-//go:build !providerless
-// +build !providerless
-
 /*
 Copyright 2019 The Kubernetes Authors.
 
@@ -25,12 +22,8 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/volume"
-	"k8s.io/kubernetes/pkg/volume/azure_file"
 	"k8s.io/kubernetes/pkg/volume/csimigration"
-	"k8s.io/kubernetes/pkg/volume/gcepd"
 	"k8s.io/kubernetes/pkg/volume/portworx"
-	"k8s.io/kubernetes/pkg/volume/rbd"
-	"k8s.io/kubernetes/pkg/volume/vsphere_volume"
 )
 
 type probeFn func() []volume.VolumePlugin
@@ -60,12 +53,9 @@ type pluginInfo struct {
 	pluginProbeFunction     probeFn
 }
 
-func appendAttachableLegacyProviderVolumes(logger klog.Logger, allPlugins []volume.VolumePlugin, featureGate featuregate.FeatureGate) ([]volume.VolumePlugin, error) {
+func appendLegacyControllerProviders(logger klog.Logger, allPlugins []volume.VolumePlugin, featureGate featuregate.FeatureGate) ([]volume.VolumePlugin, error) {
 	pluginMigrationStatus := make(map[string]pluginInfo)
-	pluginMigrationStatus[plugins.GCEPDInTreePluginName] = pluginInfo{pluginMigrationFeature: features.CSIMigrationGCE, pluginUnregisterFeature: features.InTreePluginGCEUnregister, pluginProbeFunction: gcepd.ProbeVolumePlugins}
-	pluginMigrationStatus[plugins.VSphereInTreePluginName] = pluginInfo{pluginMigrationFeature: features.CSIMigrationvSphere, pluginUnregisterFeature: features.InTreePluginvSphereUnregister, pluginProbeFunction: vsphere_volume.ProbeVolumePlugins}
 	pluginMigrationStatus[plugins.PortworxVolumePluginName] = pluginInfo{pluginMigrationFeature: features.CSIMigrationPortworx, pluginUnregisterFeature: features.InTreePluginPortworxUnregister, pluginProbeFunction: portworx.ProbeVolumePlugins}
-	pluginMigrationStatus[plugins.RBDVolumePluginName] = pluginInfo{pluginMigrationFeature: features.CSIMigrationRBD, pluginUnregisterFeature: features.InTreePluginRBDUnregister, pluginProbeFunction: rbd.ProbeVolumePlugins}
 	var err error
 	for pluginName, pluginInfo := range pluginMigrationStatus {
 		allPlugins, err = appendPluginBasedOnFeatureFlags(logger, allPlugins, pluginName, featureGate, pluginInfo)
@@ -73,32 +63,5 @@ func appendAttachableLegacyProviderVolumes(logger klog.Logger, allPlugins []volu
 			return allPlugins, err
 		}
 	}
-	return allPlugins, nil
-}
-
-func appendExpandableLegacyProviderVolumes(logger klog.Logger, allPlugins []volume.VolumePlugin, featureGate featuregate.FeatureGate) ([]volume.VolumePlugin, error) {
-	return appendLegacyProviderVolumes(logger, allPlugins, featureGate)
-}
-
-func appendLegacyProviderVolumes(logger klog.Logger, allPlugins []volume.VolumePlugin, featureGate featuregate.FeatureGate) ([]volume.VolumePlugin, error) {
-	var err error
-	// First append attachable volumes
-	allPlugins, err = appendAttachableLegacyProviderVolumes(logger, allPlugins, featureGate)
-	if err != nil {
-		return allPlugins, err
-	}
-
-	// Then append non-attachable volumes
-	pluginName := plugins.AzureFileInTreePluginName
-	pluginInfo := pluginInfo{
-		pluginMigrationFeature:  features.CSIMigrationAzureFile,
-		pluginUnregisterFeature: features.InTreePluginAzureFileUnregister,
-		pluginProbeFunction:     azure_file.ProbeVolumePlugins,
-	}
-	allPlugins, err = appendPluginBasedOnFeatureFlags(logger, allPlugins, pluginName, featureGate, pluginInfo)
-	if err != nil {
-		return allPlugins, err
-	}
-
 	return allPlugins, nil
 }

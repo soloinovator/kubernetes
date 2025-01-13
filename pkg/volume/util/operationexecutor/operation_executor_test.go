@@ -18,17 +18,17 @@ package operationexecutor
 
 import (
 	"fmt"
-	"k8s.io/klog/v2"
 	"strconv"
 	"testing"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	csitrans "k8s.io/csi-translation-lib"
 	"k8s.io/klog/v2/ktesting"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
@@ -689,20 +689,6 @@ func (fopg *fakeOperationGenerator) GenerateExpandInUseVolumeFunc(volumeToMount 
 	}, nil
 }
 
-func (fopg *fakeOperationGenerator) GenerateBulkVolumeVerifyFunc(
-	pluginNodeVolumes map[types.NodeName][]*volume.Spec,
-	pluginNane string,
-	volumeSpecMap map[*volume.Spec]v1.UniqueVolumeName,
-	actualStateOfWorldAttacherUpdater ActualStateOfWorldAttacherUpdater) (volumetypes.GeneratedOperations, error) {
-	opFunc := func() volumetypes.OperationContext {
-		startOperationAndBlock(fopg.ch, fopg.quit)
-		return volumetypes.NewOperationContext(nil, nil, false)
-	}
-	return volumetypes.GeneratedOperations{
-		OperationFunc: opFunc,
-	}, nil
-}
-
 func (fopg *fakeOperationGenerator) GenerateMapVolumeFunc(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorldMounterUpdater ActualStateOfWorldMounterUpdater) (volumetypes.GeneratedOperations, error) {
 	opFunc := func() volumetypes.OperationContext {
 		startOperationAndBlock(fopg.ch, fopg.quit)
@@ -735,10 +721,6 @@ func (fopg *fakeOperationGenerator) GenerateUnmapDeviceFunc(deviceToDetach Attac
 
 func (fopg *fakeOperationGenerator) GetVolumePluginMgr() *volume.VolumePluginMgr {
 	return nil
-}
-
-func (fopg *fakeOperationGenerator) GetCSITranslator() InTreeToCSITranslator {
-	return csitrans.New()
 }
 
 func getTestPodWithSecret(podName, secretName string) *v1.Pod {

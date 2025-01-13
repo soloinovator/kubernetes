@@ -24,7 +24,6 @@ import (
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	runtimeutil "k8s.io/kubernetes/pkg/kubelet/kuberuntime/util"
-	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 const (
@@ -55,6 +54,21 @@ func GenerateContainersReadyCondition(spec *v1.PodSpec, containerStatuses []v1.C
 	}
 	unknownContainers := []string{}
 	unreadyContainers := []string{}
+
+	for _, container := range spec.InitContainers {
+		if !podutil.IsRestartableInitContainer(&container) {
+			continue
+		}
+
+		if containerStatus, ok := podutil.GetContainerStatus(containerStatuses, container.Name); ok {
+			if !containerStatus.Ready {
+				unreadyContainers = append(unreadyContainers, container.Name)
+			}
+		} else {
+			unknownContainers = append(unknownContainers, container.Name)
+		}
+	}
+
 	for _, container := range spec.Containers {
 		if containerStatus, ok := podutil.GetContainerStatus(containerStatuses, container.Name); ok {
 			if !containerStatus.Ready {
@@ -143,6 +157,19 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, conditions []v1.PodCondition, c
 	}
 }
 
+func isInitContainerInitialized(initContainer *v1.Container, containerStatus *v1.ContainerStatus) bool {
+	if podutil.IsRestartableInitContainer(initContainer) {
+		if containerStatus.Started == nil || !*containerStatus.Started {
+			return false
+		}
+	} else { // regular init container
+		if !containerStatus.Ready {
+			return false
+		}
+	}
+	return true
+}
+
 // GeneratePodInitializedCondition returns initialized condition if all init containers in a pod are ready, else it
 // returns an uninitialized condition.
 func GeneratePodInitializedCondition(spec *v1.PodSpec, containerStatuses []v1.ContainerStatus, podPhase v1.PodPhase) v1.PodCondition {
@@ -154,15 +181,17 @@ func GeneratePodInitializedCondition(spec *v1.PodSpec, containerStatuses []v1.Co
 			Reason: UnknownContainerStatuses,
 		}
 	}
+
 	unknownContainers := []string{}
-	unreadyContainers := []string{}
+	incompleteContainers := []string{}
 	for _, container := range spec.InitContainers {
-		if containerStatus, ok := podutil.GetContainerStatus(containerStatuses, container.Name); ok {
-			if !containerStatus.Ready {
-				unreadyContainers = append(unreadyContainers, container.Name)
-			}
-		} else {
+		containerStatus, ok := podutil.GetContainerStatus(containerStatuses, container.Name)
+		if !ok {
 			unknownContainers = append(unknownContainers, container.Name)
+			continue
+		}
+		if !isInitContainerInitialized(&container, &containerStatus) {
+			incompleteContainers = append(incompleteContainers, container.Name)
 		}
 	}
 
@@ -175,12 +204,23 @@ func GeneratePodInitializedCondition(spec *v1.PodSpec, containerStatuses []v1.Co
 		}
 	}
 
-	unreadyMessages := []string{}
+	// If there is any regular container that has started, then the pod has
+	// been initialized before.
+	// This is needed to handle the case where the pod has been initialized but
+	// the restartable init containers are restarting.
+	if kubecontainer.HasAnyRegularContainerStarted(spec, containerStatuses) {
+		return v1.PodCondition{
+			Type:   v1.PodInitialized,
+			Status: v1.ConditionTrue,
+		}
+	}
+
+	unreadyMessages := make([]string, 0, len(unknownContainers)+len(incompleteContainers))
 	if len(unknownContainers) > 0 {
 		unreadyMessages = append(unreadyMessages, fmt.Sprintf("containers with unknown status: %s", unknownContainers))
 	}
-	if len(unreadyContainers) > 0 {
-		unreadyMessages = append(unreadyMessages, fmt.Sprintf("containers with incomplete status: %s", unreadyContainers))
+	if len(incompleteContainers) > 0 {
+		unreadyMessages = append(unreadyMessages, fmt.Sprintf("containers with incomplete status: %s", incompleteContainers))
 	}
 	unreadyMessage := strings.Join(unreadyMessages, ", ")
 	if unreadyMessage != "" {
@@ -206,12 +246,12 @@ func GeneratePodReadyToStartContainersCondition(pod *v1.Pod, podStatus *kubecont
 	// fresh sandbox and configure networking for the sandbox.
 	if !newSandboxNeeded {
 		return v1.PodCondition{
-			Type:   kubetypes.PodReadyToStartContainers,
+			Type:   v1.PodReadyToStartContainers,
 			Status: v1.ConditionTrue,
 		}
 	}
 	return v1.PodCondition{
-		Type:   kubetypes.PodReadyToStartContainers,
+		Type:   v1.PodReadyToStartContainers,
 		Status: v1.ConditionFalse,
 	}
 }

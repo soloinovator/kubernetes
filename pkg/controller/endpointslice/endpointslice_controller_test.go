@@ -40,11 +40,12 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/endpointslice/topologycache"
+	endpointsliceutil "k8s.io/endpointslice/util"
+	"k8s.io/klog/v2/ktesting"
 	"k8s.io/kubernetes/pkg/controller"
-	"k8s.io/kubernetes/pkg/controller/endpointslice/topologycache"
-	endpointutil "k8s.io/kubernetes/pkg/controller/util/endpoint"
-	endpointsliceutil "k8s.io/kubernetes/pkg/controller/util/endpointslice"
-	"k8s.io/utils/pointer"
+	endpointslicepkg "k8s.io/kubernetes/pkg/controller/util/endpointslice"
+	"k8s.io/utils/ptr"
 )
 
 // Most of the tests related to EndpointSlice allocation can be found in reconciler_test.go
@@ -60,7 +61,7 @@ type endpointSliceController struct {
 	serviceStore       cache.Store
 }
 
-func newController(nodeNames []string, batchPeriod time.Duration) (*fake.Clientset, *endpointSliceController) {
+func newController(t *testing.T, nodeNames []string, batchPeriod time.Duration) (*fake.Clientset, *endpointSliceController) {
 	client := fake.NewSimpleClientset()
 
 	informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
@@ -95,7 +96,9 @@ func newController(nodeNames []string, batchPeriod time.Duration) (*fake.Clients
 		return false, endpointSlice, nil
 	}))
 
+	_, ctx := ktesting.NewTestContext(t)
 	esController := NewController(
+		ctx,
 		informerFactory.Core().V1().Pods(),
 		informerFactory.Core().V1().Services(),
 		nodeInformer,
@@ -118,11 +121,70 @@ func newController(nodeNames []string, batchPeriod time.Duration) (*fake.Clients
 	}
 }
 
+func newPod(n int, namespace string, ready bool, nPorts int, terminating bool) *v1.Pod {
+	status := v1.ConditionTrue
+	if !ready {
+		status = v1.ConditionFalse
+	}
+
+	var deletionTimestamp *metav1.Time
+	if terminating {
+		deletionTimestamp = &metav1.Time{
+			Time: time.Now(),
+		}
+	}
+
+	p := &v1.Pod{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:         namespace,
+			Name:              fmt.Sprintf("pod%d", n),
+			Labels:            map[string]string{"foo": "bar"},
+			DeletionTimestamp: deletionTimestamp,
+			ResourceVersion:   fmt.Sprint(n),
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{
+				Name: "container-1",
+			}},
+			NodeName: "node-1",
+		},
+		Status: v1.PodStatus{
+			PodIP: fmt.Sprintf("1.2.3.%d", 4+n),
+			PodIPs: []v1.PodIP{{
+				IP: fmt.Sprintf("1.2.3.%d", 4+n),
+			}},
+			Conditions: []v1.PodCondition{
+				{
+					Type:   v1.PodReady,
+					Status: status,
+				},
+			},
+		},
+	}
+
+	return p
+}
+
+func expectActions(t *testing.T, actions []k8stesting.Action, num int, verb, resource string) {
+	t.Helper()
+	// if actions are less the below logic will panic
+	if num > len(actions) {
+		t.Fatalf("len of actions %v is unexpected. Expected to be at least %v", len(actions), num+1)
+	}
+
+	for i := 0; i < num; i++ {
+		relativePos := len(actions) - i - 1
+		assert.Equal(t, verb, actions[relativePos].GetVerb(), "Expected action -%d verb to be %s", i, verb)
+		assert.Equal(t, resource, actions[relativePos].GetResource().Resource, "Expected action -%d resource to be %s", i, resource)
+	}
+}
+
 // Ensure SyncService for service with no selector results in no action
 func TestSyncServiceNoSelector(t *testing.T) {
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	esController.serviceStore.Add(&v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
 		Spec: v1.ServiceSpec{
@@ -130,9 +192,10 @@ func TestSyncServiceNoSelector(t *testing.T) {
 		},
 	})
 
-	err := esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
-	assert.NoError(t, err)
-	assert.Len(t, client.Actions(), 0)
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
+	require.NoError(t, err)
+	assert.Empty(t, client.Actions())
 }
 
 func TestServiceExternalNameTypeSync(t *testing.T) {
@@ -187,22 +250,23 @@ func TestServiceExternalNameTypeSync(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			client, esController := newController([]string{"node-1"}, time.Duration(0))
+			client, esController := newController(t, []string{"node-1"}, time.Duration(0))
+			logger, _ := ktesting.NewTestContext(t)
 
 			pod := newPod(1, namespace, true, 0, false)
 			err := esController.podStore.Add(pod)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			err = esController.serviceStore.Add(tc.service)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
-			err = esController.syncService(fmt.Sprintf("%s/%s", namespace, serviceName))
-			assert.NoError(t, err)
-			assert.Len(t, client.Actions(), 0)
+			err = esController.syncService(logger, fmt.Sprintf("%s/%s", namespace, serviceName))
+			require.NoError(t, err)
+			assert.Empty(t, client.Actions())
 
 			sliceList, err := client.DiscoveryV1().EndpointSlices(namespace).List(context.TODO(), metav1.ListOptions{})
-			assert.NoError(t, err)
-			assert.Len(t, sliceList.Items, 0, "Expected 0 endpoint slices")
+			require.NoError(t, err)
+			assert.Empty(t, sliceList.Items, "Expected 0 endpoint slices")
 		})
 	}
 }
@@ -212,7 +276,7 @@ func TestSyncServicePendingDeletion(t *testing.T) {
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
 	deletionTimestamp := metav1.Now()
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	esController.serviceStore.Add(&v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns, DeletionTimestamp: &deletionTimestamp},
 		Spec: v1.ServiceSpec{
@@ -221,21 +285,22 @@ func TestSyncServicePendingDeletion(t *testing.T) {
 		},
 	})
 
-	err := esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
-	assert.NoError(t, err)
-	assert.Len(t, client.Actions(), 0)
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
+	require.NoError(t, err)
+	assert.Empty(t, client.Actions())
 }
 
 // Ensure SyncService for service with selector but no pods results in placeholder EndpointSlice
 func TestSyncServiceWithSelector(t *testing.T) {
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	standardSyncService(t, esController, ns, serviceName)
 	expectActions(t, client.Actions(), 1, "create", "endpointslices")
 
 	sliceList, err := client.DiscoveryV1().EndpointSlices(ns).List(context.TODO(), metav1.ListOptions{})
-	assert.Nil(t, err, "Expected no error fetching endpoint slices")
+	require.NoError(t, err, "Expected no error fetching endpoint slices")
 	assert.Len(t, sliceList.Items, 1, "Expected 1 endpoint slices")
 	slice := sliceList.Items[0]
 	assert.Regexp(t, "^"+serviceName, slice.Name)
@@ -250,12 +315,12 @@ func TestSyncServiceWithSelector(t *testing.T) {
 // remove too much.
 func TestSyncServiceMissing(t *testing.T) {
 	namespace := metav1.NamespaceDefault
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 
 	// Build up existing service
 	existingServiceName := "stillthere"
-	existingServiceKey := endpointutil.ServiceKey{Name: existingServiceName, Namespace: namespace}
-	esController.triggerTimeTracker.ServiceStates[existingServiceKey] = endpointutil.ServiceState{}
+	existingServiceKey := endpointsliceutil.ServiceKey{Name: existingServiceName, Namespace: namespace}
+	esController.triggerTimeTracker.ServiceStates[existingServiceKey] = endpointsliceutil.ServiceState{}
 	esController.serviceStore.Add(&v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: existingServiceName, Namespace: namespace},
 		Spec: v1.ServiceSpec{
@@ -266,16 +331,17 @@ func TestSyncServiceMissing(t *testing.T) {
 
 	// Add missing service to triggerTimeTracker to ensure the reference is cleaned up
 	missingServiceName := "notthere"
-	missingServiceKey := endpointutil.ServiceKey{Name: missingServiceName, Namespace: namespace}
-	esController.triggerTimeTracker.ServiceStates[missingServiceKey] = endpointutil.ServiceState{}
+	missingServiceKey := endpointsliceutil.ServiceKey{Name: missingServiceName, Namespace: namespace}
+	esController.triggerTimeTracker.ServiceStates[missingServiceKey] = endpointsliceutil.ServiceState{}
 
-	err := esController.syncService(fmt.Sprintf("%s/%s", namespace, missingServiceName))
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", namespace, missingServiceName))
 
 	// nil should be returned when the service doesn't exist
-	assert.Nil(t, err, "Expected no error syncing service")
+	require.NoError(t, err, "Expected no error syncing service")
 
 	// That should mean no client actions were performed
-	assert.Len(t, client.Actions(), 0)
+	assert.Empty(t, client.Actions())
 
 	// TriggerTimeTracker should have removed the reference to the missing service
 	assert.NotContains(t, esController.triggerTimeTracker.ServiceStates, missingServiceKey)
@@ -286,7 +352,7 @@ func TestSyncServiceMissing(t *testing.T) {
 
 // Ensure SyncService correctly selects Pods.
 func TestSyncServicePodSelection(t *testing.T) {
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	ns := metav1.NamespaceDefault
 
 	pod1 := newPod(1, ns, true, 0, false)
@@ -302,22 +368,23 @@ func TestSyncServicePodSelection(t *testing.T) {
 
 	// an endpoint slice should be created, it should only reference pod1 (not pod2)
 	slices, err := client.DiscoveryV1().EndpointSlices(ns).List(context.TODO(), metav1.ListOptions{})
-	assert.Nil(t, err, "Expected no error fetching endpoint slices")
+	require.NoError(t, err, "Expected no error fetching endpoint slices")
 	assert.Len(t, slices.Items, 1, "Expected 1 endpoint slices")
 	slice := slices.Items[0]
 	assert.Len(t, slice.Endpoints, 1, "Expected 1 endpoint in first slice")
 	assert.NotEmpty(t, slice.Annotations[v1.EndpointsLastChangeTriggerTime])
 	endpoint := slice.Endpoints[0]
-	assert.EqualValues(t, endpoint.TargetRef, &v1.ObjectReference{Kind: "Pod", Namespace: ns, Name: pod1.Name})
+	assert.EqualValues(t, &v1.ObjectReference{Kind: "Pod", Namespace: ns, Name: pod1.Name}, endpoint.TargetRef)
 }
 
 func TestSyncServiceEndpointSlicePendingDeletion(t *testing.T) {
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
 	service := createService(t, esController, ns, serviceName)
-	err := esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
-	assert.Nil(t, err, "Expected no error syncing service")
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
+	require.NoError(t, err, "Expected no error syncing service")
 
 	gvk := schema.GroupVersionKind{Version: "v1", Kind: "Service"}
 	ownerRef := metav1.NewControllerRef(service, gvk)
@@ -345,9 +412,10 @@ func TestSyncServiceEndpointSlicePendingDeletion(t *testing.T) {
 		t.Fatalf("Expected no error creating EndpointSlice: %v", err)
 	}
 
+	logger, _ = ktesting.NewTestContext(t)
 	numActionsBefore := len(client.Actions())
-	err = esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
-	assert.Nil(t, err, "Expected no error syncing service")
+	err = esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
+	require.NoError(t, err, "Expected no error syncing service")
 
 	// The EndpointSlice marked for deletion should be ignored by the controller, and thus
 	// should not result in any action.
@@ -358,7 +426,7 @@ func TestSyncServiceEndpointSlicePendingDeletion(t *testing.T) {
 
 // Ensure SyncService correctly selects and labels EndpointSlices.
 func TestSyncServiceEndpointSliceLabelSelection(t *testing.T) {
-	client, esController := newController([]string{"node-1"}, time.Duration(0))
+	client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
 	service := createService(t, esController, ns, serviceName)
@@ -435,8 +503,9 @@ func TestSyncServiceEndpointSliceLabelSelection(t *testing.T) {
 	}
 
 	numActionsBefore := len(client.Actions())
-	err := esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
-	assert.Nil(t, err, "Expected no error syncing service")
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
+	require.NoError(t, err, "Expected no error syncing service")
 
 	if len(client.Actions()) != numActionsBefore+2 {
 		t.Errorf("Expected 2 more actions, got %d", len(client.Actions())-numActionsBefore)
@@ -451,7 +520,7 @@ func TestSyncServiceEndpointSliceLabelSelection(t *testing.T) {
 }
 
 func TestOnEndpointSliceUpdate(t *testing.T) {
-	_, esController := newController([]string{"node-1"}, time.Duration(0))
+	_, esController := newController(t, []string{"node-1"}, time.Duration(0))
 	ns := metav1.NamespaceDefault
 	serviceName := "testing-1"
 	epSlice1 := &discovery.EndpointSlice{
@@ -466,13 +535,14 @@ func TestOnEndpointSliceUpdate(t *testing.T) {
 		AddressType: discovery.AddressTypeIPv4,
 	}
 
+	logger, _ := ktesting.NewTestContext(t)
 	epSlice2 := epSlice1.DeepCopy()
 	epSlice2.Labels[discovery.LabelManagedBy] = "something else"
 
-	assert.Equal(t, 0, esController.queue.Len())
-	esController.onEndpointSliceUpdate(epSlice1, epSlice2)
+	assert.Equal(t, 0, esController.serviceQueue.Len())
+	esController.onEndpointSliceUpdate(logger, epSlice1, epSlice2)
 	err := wait.PollImmediate(100*time.Millisecond, 3*time.Second, func() (bool, error) {
-		if esController.queue.Len() > 0 {
+		if esController.serviceQueue.Len() > 0 {
 			return true, nil
 		}
 		return false, nil
@@ -480,7 +550,7 @@ func TestOnEndpointSliceUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error waiting for add to queue")
 	}
-	assert.Equal(t, 1, esController.queue.Len())
+	assert.Equal(t, 1, esController.serviceQueue.Len())
 }
 
 func TestSyncService(t *testing.T) {
@@ -573,41 +643,41 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.String("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32(3456),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.String("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32(161),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.String("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32(80),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(true),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod0"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(true),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.2"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -690,31 +760,31 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.String("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32(3456),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.String("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32(161),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.String("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32(80),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(true),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"fd08::5678:0000:0000:9abc:def0"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -795,41 +865,41 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.String("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32(3456),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.String("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32(161),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.String("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32(80),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(true),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod0"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(false),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(true),
+						Ready:       ptr.To(false),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(true),
 					},
 					Addresses: []string{"10.0.0.2"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -910,41 +980,41 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.String("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32(3456),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.String("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32(161),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.String("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32(80),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(true),
-						Serving:     pointer.Bool(true),
-						Terminating: pointer.Bool(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod0"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.Bool(false),
-						Serving:     pointer.Bool(false),
-						Terminating: pointer.Bool(true),
+						Ready:       ptr.To(false),
+						Serving:     ptr.To(false),
+						Terminating: ptr.To(true),
 					},
 					Addresses: []string{"10.0.0.2"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.String("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -1040,41 +1110,41 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.StringPtr("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32Ptr(int32(3456)),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.StringPtr("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32Ptr(int32(161)),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.StringPtr("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32Ptr(int32(80)),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.BoolPtr(true),
-						Serving:     pointer.BoolPtr(true),
-						Terminating: pointer.BoolPtr(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod0"},
-					NodeName:  pointer.StringPtr("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.BoolPtr(false),
-						Serving:     pointer.BoolPtr(false),
-						Terminating: pointer.BoolPtr(false),
+						Ready:       ptr.To(false),
+						Serving:     ptr.To(false),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.StringPtr("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -1172,41 +1242,41 @@ func TestSyncService(t *testing.T) {
 			},
 			expectedEndpointPorts: []discovery.EndpointPort{
 				{
-					Name:     pointer.StringPtr("sctp-example"),
-					Protocol: protoPtr(v1.ProtocolSCTP),
-					Port:     pointer.Int32Ptr(int32(3456)),
+					Name:     ptr.To("sctp-example"),
+					Protocol: ptr.To(v1.ProtocolSCTP),
+					Port:     ptr.To[int32](3456),
 				},
 				{
-					Name:     pointer.StringPtr("udp-example"),
-					Protocol: protoPtr(v1.ProtocolUDP),
-					Port:     pointer.Int32Ptr(int32(161)),
+					Name:     ptr.To("udp-example"),
+					Protocol: ptr.To(v1.ProtocolUDP),
+					Port:     ptr.To[int32](161),
 				},
 				{
-					Name:     pointer.StringPtr("tcp-example"),
-					Protocol: protoPtr(v1.ProtocolTCP),
-					Port:     pointer.Int32Ptr(int32(80)),
+					Name:     ptr.To("tcp-example"),
+					Protocol: ptr.To(v1.ProtocolTCP),
+					Port:     ptr.To[int32](80),
 				},
 			},
 			expectedEndpoints: []discovery.Endpoint{
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.BoolPtr(true),
-						Serving:     pointer.BoolPtr(true),
-						Terminating: pointer.BoolPtr(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod0"},
-					NodeName:  pointer.StringPtr("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 				{
 					Conditions: discovery.EndpointConditions{
-						Ready:       pointer.BoolPtr(true),
-						Serving:     pointer.BoolPtr(true),
-						Terminating: pointer.BoolPtr(false),
+						Ready:       ptr.To(true),
+						Serving:     ptr.To(true),
+						Terminating: ptr.To(false),
 					},
 					Addresses: []string{"10.0.0.1"},
 					TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: "default", Name: "pod1"},
-					NodeName:  pointer.StringPtr("node-1"),
+					NodeName:  ptr.To("node-1"),
 				},
 			},
 		},
@@ -1214,7 +1284,7 @@ func TestSyncService(t *testing.T) {
 
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			client, esController := newController([]string{"node-1"}, time.Duration(0))
+			client, esController := newController(t, []string{"node-1"}, time.Duration(0))
 
 			for _, pod := range testcase.pods {
 				esController.podStore.Add(pod)
@@ -1222,15 +1292,16 @@ func TestSyncService(t *testing.T) {
 			esController.serviceStore.Add(testcase.service)
 
 			_, err := esController.client.CoreV1().Services(testcase.service.Namespace).Create(context.TODO(), testcase.service, metav1.CreateOptions{})
-			assert.Nil(t, err, "Expected no error creating service")
+			require.NoError(t, err, "Expected no error creating service")
 
-			err = esController.syncService(fmt.Sprintf("%s/%s", testcase.service.Namespace, testcase.service.Name))
-			assert.Nil(t, err)
+			logger, _ := ktesting.NewTestContext(t)
+			err = esController.syncService(logger, fmt.Sprintf("%s/%s", testcase.service.Namespace, testcase.service.Name))
+			require.NoError(t, err)
 
 			// last action should be to create endpoint slice
 			expectActions(t, client.Actions(), 1, "create", "endpointslices")
 			sliceList, err := client.DiscoveryV1().EndpointSlices(testcase.service.Namespace).List(context.TODO(), metav1.ListOptions{})
-			assert.Nil(t, err, "Expected no error fetching endpoint slices")
+			require.NoError(t, err, "Expected no error fetching endpoint slices")
 			assert.Len(t, sliceList.Items, 1, "Expected 1 endpoint slices")
 
 			// ensure all attributes of endpoint slice match expected state
@@ -1318,11 +1389,12 @@ func TestPodAddsBatching(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ns := metav1.NamespaceDefault
-			client, esController := newController([]string{"node-1"}, tc.batchPeriod)
+			client, esController := newController(t, []string{"node-1"}, tc.batchPeriod)
 			stopCh := make(chan struct{})
 			defer close(stopCh)
 
-			go esController.Run(1, stopCh)
+			_, ctx := ktesting.NewTestContext(t)
+			go esController.Run(ctx, 1)
 
 			esController.serviceStore.Add(&v1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: ns},
@@ -1452,11 +1524,12 @@ func TestPodUpdatesBatching(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ns := metav1.NamespaceDefault
-			client, esController := newController([]string{"node-1"}, tc.batchPeriod)
+			client, esController := newController(t, []string{"node-1"}, tc.batchPeriod)
 			stopCh := make(chan struct{})
 			defer close(stopCh)
 
-			go esController.Run(1, stopCh)
+			_, ctx := ktesting.NewTestContext(t)
+			go esController.Run(ctx, 1)
 
 			addPods(t, esController, ns, tc.podsCount)
 
@@ -1589,11 +1662,12 @@ func TestPodDeleteBatching(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ns := metav1.NamespaceDefault
-			client, esController := newController([]string{"node-1"}, tc.batchPeriod)
+			client, esController := newController(t, []string{"node-1"}, tc.batchPeriod)
 			stopCh := make(chan struct{})
 			defer close(stopCh)
 
-			go esController.Run(1, stopCh)
+			_, ctx := ktesting.NewTestContext(t)
+			go esController.Run(ctx, 1)
 
 			addPods(t, esController, ns, tc.podsCount)
 
@@ -1610,8 +1684,8 @@ func TestPodDeleteBatching(t *testing.T) {
 				time.Sleep(update.delay)
 
 				old, exists, err := esController.podStore.GetByKey(fmt.Sprintf("%s/%s", ns, update.podName))
-				assert.Nil(t, err, "error while retrieving old value of %q: %v", update.podName, err)
-				assert.Equal(t, true, exists, "pod should exist")
+				require.NoError(t, err, "error while retrieving old value of %q: %v", update.podName, err)
+				assert.True(t, exists, "pod should exist")
 				esController.podStore.Delete(old)
 				esController.deletePod(old)
 			}
@@ -1655,7 +1729,7 @@ func TestSyncServiceStaleInformer(t *testing.T) {
 
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			_, esController := newController([]string{"node-1"}, time.Duration(0))
+			_, esController := newController(t, []string{"node-1"}, time.Duration(0))
 			ns := metav1.NamespaceDefault
 			serviceName := "testing-1"
 
@@ -1691,9 +1765,10 @@ func TestSyncServiceStaleInformer(t *testing.T) {
 			epSlice2.Generation = testcase.trackerGenerationNumber
 			esController.endpointSliceTracker.Update(epSlice2)
 
-			err = esController.syncService(fmt.Sprintf("%s/%s", ns, serviceName))
+			logger, _ := ktesting.NewTestContext(t)
+			err = esController.syncService(logger, fmt.Sprintf("%s/%s", ns, serviceName))
 			// Check if we got a StaleInformerCache error
-			if endpointsliceutil.IsStaleInformerCacheErr(err) != testcase.expectError {
+			if endpointslicepkg.IsStaleInformerCacheErr(err) != testcase.expectError {
 				t.Fatalf("Expected error because informer cache is outdated")
 			}
 
@@ -1835,7 +1910,7 @@ func Test_checkNodeTopologyDistribution(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, esController := newController([]string{}, time.Duration(0))
+			_, esController := newController(t, []string{}, time.Duration(0))
 
 			for i, nodeInfo := range tc.nodes {
 				node := &v1.Node{
@@ -1869,10 +1944,11 @@ func Test_checkNodeTopologyDistribution(t *testing.T) {
 				}
 			}
 
-			esController.checkNodeTopologyDistribution()
+			logger, _ := ktesting.NewTestContext(t)
+			esController.checkNodeTopologyDistribution(logger)
 
-			if esController.queue.Len() != tc.expectedQueueLen {
-				t.Errorf("Expected %d services to be queued, got %d", tc.expectedQueueLen, esController.queue.Len())
+			if esController.serviceQueue.Len() != tc.expectedQueueLen {
+				t.Errorf("Expected %d services to be queued, got %d", tc.expectedQueueLen, esController.serviceQueue.Len())
 			}
 		})
 	}
@@ -1890,7 +1966,7 @@ func TestUpdateNode(t *testing.T) {
 			},
 		},
 	}
-	_, esController := newController(nil, time.Duration(0))
+	_, esController := newController(t, nil, time.Duration(0))
 	sliceInfo := &topologycache.SliceInfo{
 		ServiceKey:  "ns/svc",
 		AddressType: discovery.AddressTypeIPv4,
@@ -1907,13 +1983,13 @@ func TestUpdateNode(t *testing.T) {
 				Endpoints: []discovery.Endpoint{
 					{
 						Addresses:  []string{"172.18.0.2"},
-						Zone:       pointer.String("zone-a"),
-						Conditions: discovery.EndpointConditions{Ready: pointer.Bool(true)},
+						Zone:       ptr.To("zone-a"),
+						Conditions: discovery.EndpointConditions{Ready: ptr.To(true)},
 					},
 					{
 						Addresses:  []string{"172.18.1.2"},
-						Zone:       pointer.String("zone-b"),
-						Conditions: discovery.EndpointConditions{Ready: pointer.Bool(true)},
+						Zone:       ptr.To("zone-b"),
+						Conditions: discovery.EndpointConditions{Ready: ptr.To(true)},
 					},
 				},
 				AddressType: discovery.AddressTypeIPv4,
@@ -1928,12 +2004,16 @@ func TestUpdateNode(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "node-2"},
 		Status:     nodeReadyStatus,
 	}
+	logger, _ := ktesting.NewTestContext(t)
 	esController.nodeStore.Add(node1)
 	esController.nodeStore.Add(node2)
-	esController.addNode(node1)
-	esController.addNode(node2)
+	esController.addNode()
+	esController.addNode()
+	assert.Equal(t, 1, esController.topologyQueue.Len())
+	esController.processNextTopologyWorkItem(logger)
+	assert.Equal(t, 0, esController.topologyQueue.Len())
 	// The Nodes don't have the zone label, AddHints should fail.
-	_, _, eventsBuilders := esController.topologyCache.AddHints(sliceInfo)
+	_, _, eventsBuilders := esController.topologyCache.AddHints(logger, sliceInfo)
 	require.Len(t, eventsBuilders, 1)
 	assert.Contains(t, eventsBuilders[0].Message, topologycache.InsufficientNodeInfo)
 
@@ -1947,7 +2027,10 @@ func TestUpdateNode(t *testing.T) {
 	esController.nodeStore.Update(updateNode2)
 	esController.updateNode(node1, updateNode1)
 	esController.updateNode(node2, updateNode2)
-	_, _, eventsBuilders = esController.topologyCache.AddHints(sliceInfo)
+	assert.Equal(t, 1, esController.topologyQueue.Len())
+	esController.processNextTopologyWorkItem(logger)
+	assert.Equal(t, 0, esController.topologyQueue.Len())
+	_, _, eventsBuilders = esController.topologyCache.AddHints(logger, sliceInfo)
 	require.Len(t, eventsBuilders, 1)
 	assert.Contains(t, eventsBuilders[0].Message, topologycache.TopologyAwareHintsEnabled)
 }
@@ -1965,8 +2048,9 @@ func standardSyncService(t *testing.T, esController *endpointSliceController, na
 	t.Helper()
 	createService(t, esController, namespace, serviceName)
 
-	err := esController.syncService(fmt.Sprintf("%s/%s", namespace, serviceName))
-	assert.Nil(t, err, "Expected no error syncing service")
+	logger, _ := ktesting.NewTestContext(t)
+	err := esController.syncService(logger, fmt.Sprintf("%s/%s", namespace, serviceName))
+	require.NoError(t, err, "Expected no error syncing service")
 }
 
 func createService(t *testing.T, esController *endpointSliceController, namespace, serviceName string) *v1.Service {
@@ -1986,7 +2070,7 @@ func createService(t *testing.T, esController *endpointSliceController, namespac
 	}
 	esController.serviceStore.Add(service)
 	_, err := esController.client.CoreV1().Services(namespace).Create(context.TODO(), service, metav1.CreateOptions{})
-	assert.Nil(t, err, "Expected no error creating service")
+	require.NoError(t, err, "Expected no error creating service")
 	return service
 }
 
@@ -2004,11 +2088,6 @@ func expectAction(t *testing.T, actions []k8stesting.Action, index int, verb, re
 	if action.GetResource().Resource != resource {
 		t.Errorf("Expected action %d resource to be %s, got %s", index, resource, action.GetResource().Resource)
 	}
-}
-
-// protoPtr takes a Protocol and returns a pointer to it.
-func protoPtr(proto v1.Protocol) *v1.Protocol {
-	return &proto
 }
 
 // cacheMutationCheck helps ensure that cached objects have not been changed

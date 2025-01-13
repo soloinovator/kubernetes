@@ -7,11 +7,11 @@
       "categories": [
         "api-extensions"
       ],
-      "kind": "ValidatingAdmissionPolicy",
-      "name": "validatingadmissionpolicies",
+      "kind": "MutatingAdmissionPolicy",
+      "name": "mutatingadmissionpolicies",
       "namespaced": false,
-      "singularName": "validatingadmissionpolicy",
-      "storageVersionHash": "Vd+hadMG3gs=",
+      "singularName": "mutatingadmissionpolicy",
+      "storageVersionHash": "lP2+lF8aHIY=",
       "verbs": [
         "create",
         "delete",
@@ -24,25 +24,14 @@
       ]
     },
     {
-      "kind": "ValidatingAdmissionPolicy",
-      "name": "validatingadmissionpolicies/status",
-      "namespaced": false,
-      "singularName": "",
-      "verbs": [
-        "get",
-        "patch",
-        "update"
-      ]
-    },
-    {
       "categories": [
         "api-extensions"
       ],
-      "kind": "ValidatingAdmissionPolicyBinding",
-      "name": "validatingadmissionpolicybindings",
+      "kind": "MutatingAdmissionPolicyBinding",
+      "name": "mutatingadmissionpolicybindings",
       "namespaced": false,
-      "singularName": "validatingadmissionpolicybinding",
-      "storageVersionHash": "Yc3M4GKADk4=",
+      "singularName": "mutatingadmissionpolicybinding",
+      "storageVersionHash": "Q2Qe566oRi8=",
       "verbs": [
         "create",
         "delete",

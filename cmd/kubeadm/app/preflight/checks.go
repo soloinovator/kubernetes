@@ -54,8 +54,6 @@ import (
 )
 
 const (
-	bridgenf                    = "/proc/sys/net/bridge/bridge-nf-call-iptables"
-	bridgenf6                   = "/proc/sys/net/bridge/bridge-nf-call-ip6tables"
 	ipv4Forward                 = "/proc/sys/net/ipv4/ip_forward"
 	ipv6DefaultForwarding       = "/proc/sys/net/ipv6/conf/default/forwarding"
 	externalEtcdRequestTimeout  = 10 * time.Second
@@ -653,7 +651,9 @@ func (swc SwapCheck) Check() (warnings, errorList []error) {
 	}
 
 	if len(buf) > 1 {
-		return []error{errors.New("swap is enabled; production deployments should disable swap unless testing the NodeSwap feature gate of the kubelet")}, nil
+		return []error{errors.New("swap is supported for cgroup v2 only. " +
+			"The kubelet must be properly configured to use swap. Please refer to https://kubernetes.io/docs/concepts/architecture/nodes/#swap-memory, " +
+			"or disable swap on the node")}, nil
 	}
 
 	return nil, nil
@@ -815,6 +815,7 @@ type ImagePullCheck struct {
 	imageList       []string
 	sandboxImage    string
 	imagePullPolicy v1.PullPolicy
+	imagePullSerial bool
 }
 
 // Name returns the label for ImagePullCheck
@@ -824,25 +825,41 @@ func (ImagePullCheck) Name() string {
 
 // Check pulls images required by kubeadm. This is a mutating check
 func (ipc ImagePullCheck) Check() (warnings, errorList []error) {
+	// Handle unsupported image pull policy and policy Never.
 	policy := ipc.imagePullPolicy
-	klog.V(1).Infof("using image pull policy: %s", policy)
-	for _, image := range ipc.imageList {
-		if image == ipc.sandboxImage {
-			criSandboxImage, err := ipc.runtime.SandboxImage()
-			if err != nil {
-				klog.V(4).Infof("failed to detect the sandbox image for local container runtime, %v", err)
-			} else if criSandboxImage != ipc.sandboxImage {
-				klog.Warningf("detected that the sandbox image %q of the container runtime is inconsistent with that used by kubeadm. It is recommended that using %q as the CRI sandbox image.",
-					criSandboxImage, ipc.sandboxImage)
-			}
+	switch policy {
+	case v1.PullAlways, v1.PullIfNotPresent:
+		klog.V(1).Infof("using image pull policy: %s", policy)
+	case v1.PullNever:
+		klog.V(1).Infof("skipping the pull of all images due to policy: %s", policy)
+		return warnings, errorList
+	default:
+		errorList = append(errorList, errors.Errorf("unsupported pull policy %q", policy))
+		return warnings, errorList
+	}
+
+	// Handle CRI sandbox image warnings.
+	criSandboxImage, err := ipc.runtime.SandboxImage()
+	if err != nil {
+		klog.V(4).Infof("failed to detect the sandbox image for local container runtime, %v", err)
+	} else if criSandboxImage != ipc.sandboxImage {
+		klog.Warningf("detected that the sandbox image %q of the container runtime is inconsistent with that used by kubeadm."+
+			"It is recommended to use %q as the CRI sandbox image.", criSandboxImage, ipc.sandboxImage)
+	}
+
+	// Perform parallel pulls.
+	if !ipc.imagePullSerial {
+		if err := ipc.runtime.PullImagesInParallel(ipc.imageList, policy == v1.PullIfNotPresent); err != nil {
+			errorList = append(errorList, err)
 		}
+		return warnings, errorList
+	}
+
+	// Perform serial pulls.
+	for _, image := range ipc.imageList {
 		switch policy {
-		case v1.PullNever:
-			klog.V(1).Infof("skipping pull of image: %s", image)
-			continue
 		case v1.PullIfNotPresent:
-			ret, err := ipc.runtime.ImageExists(image)
-			if ret && err == nil {
+			if ipc.runtime.ImageExists(image) {
 				klog.V(1).Infof("image exists: %s", image)
 				continue
 			}
@@ -853,14 +870,11 @@ func (ipc ImagePullCheck) Check() (warnings, errorList []error) {
 		case v1.PullAlways:
 			klog.V(1).Infof("pulling: %s", image)
 			if err := ipc.runtime.PullImage(image); err != nil {
-				errorList = append(errorList, errors.Wrapf(err, "failed to pull image %s", image))
+				errorList = append(errorList, errors.WithMessagef(err, "failed to pull image %s", image))
 			}
-		default:
-			// If the policy is unknown return early with an error
-			errorList = append(errorList, errors.Errorf("unsupported pull policy %q", policy))
-			return warnings, errorList
 		}
 	}
+
 	return warnings, errorList
 }
 
@@ -893,14 +907,8 @@ func (MemCheck) Name() string {
 	return "Mem"
 }
 
+// InitNodeChecks returns checks specific to "kubeadm init"
 func InitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfiguration, ignorePreflightErrors sets.Set[string], isSecondaryControlPlane bool, downloadCerts bool) ([]Checker, error) {
-	if !isSecondaryControlPlane {
-		// First, check if we're root separately from the other preflight checks and fail fast
-		if err := RunRootCheckOnly(ignorePreflightErrors); err != nil {
-			return nil, err
-		}
-	}
-
 	manifestsDir := filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.ManifestsSubDirName)
 	checks := []Checker{
 		NumCPUCheck{NumCPU: kubeadmconstants.ControlPlaneNumCPU},
@@ -1013,12 +1021,8 @@ func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfigura
 	return RunChecks(checks, os.Stderr, ignorePreflightErrors)
 }
 
+// JoinNodeChecks returns checks specific to "kubeadm join"
 func JoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfiguration, ignorePreflightErrors sets.Set[string]) ([]Checker, error) {
-	// First, check if we're root separately from the other preflight checks and fail fast
-	if err := RunRootCheckOnly(ignorePreflightErrors); err != nil {
-		return nil, err
-	}
-
 	checks := []Checker{
 		FileAvailableCheck{Path: filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.KubeletKubeConfigFileName)},
 		FileAvailableCheck{Path: filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.KubeletBootstrapKubeConfigFileName)},
@@ -1059,8 +1063,8 @@ func RunJoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfigura
 // addCommonChecks is a helper function to duplicate checks that are common between both the
 // kubeadm init and join commands
 func addCommonChecks(execer utilsexec.Interface, k8sVersion string, nodeReg *kubeadmapi.NodeRegistrationOptions, checks []Checker) []Checker {
-	containerRuntime, err := utilruntime.NewContainerRuntime(execer, nodeReg.CRISocket)
-	if err != nil {
+	containerRuntime := utilruntime.NewContainerRuntime(nodeReg.CRISocket)
+	if err := containerRuntime.Connect(); err != nil {
 		klog.Warningf("[preflight] WARNING: Couldn't create the interface used for talking to the container runtime: %v\n", err)
 	} else {
 		checks = append(checks, ContainerRuntimeCheck{runtime: containerRuntime})
@@ -1068,7 +1072,7 @@ func addCommonChecks(execer utilsexec.Interface, k8sVersion string, nodeReg *kub
 
 	// non-windows checks
 	checks = addSwapCheck(checks)
-	checks = addExecChecks(checks, execer)
+	checks = addExecChecks(checks, execer, k8sVersion)
 	checks = append(checks,
 		SystemVerificationCheck{},
 		HostnameCheck{nodeName: nodeReg.Name},
@@ -1087,11 +1091,25 @@ func RunRootCheckOnly(ignorePreflightErrors sets.Set[string]) error {
 	return RunChecks(checks, os.Stderr, ignorePreflightErrors)
 }
 
+// RunUpgradeChecks initializes checks slice of structs and call RunChecks
+func RunUpgradeChecks(ignorePreflightErrors sets.Set[string]) error {
+	checks := []Checker{
+		SystemVerificationCheck{},
+	}
+
+	return RunChecks(checks, os.Stderr, ignorePreflightErrors)
+}
+
 // RunPullImagesCheck will pull images kubeadm needs if they are not found on the system
 func RunPullImagesCheck(execer utilsexec.Interface, cfg *kubeadmapi.InitConfiguration, ignorePreflightErrors sets.Set[string]) error {
-	containerRuntime, err := utilruntime.NewContainerRuntime(utilsexec.New(), cfg.NodeRegistration.CRISocket)
-	if err != nil {
+	containerRuntime := utilruntime.NewContainerRuntime(cfg.NodeRegistration.CRISocket)
+	if err := containerRuntime.Connect(); err != nil {
 		return &Error{Msg: err.Error()}
+	}
+
+	serialPull := true
+	if cfg.NodeRegistration.ImagePullSerial != nil {
+		serialPull = *cfg.NodeRegistration.ImagePullSerial
 	}
 
 	checks := []Checker{
@@ -1100,6 +1118,7 @@ func RunPullImagesCheck(execer utilsexec.Interface, cfg *kubeadmapi.InitConfigur
 			imageList:       images.GetControlPlaneImages(&cfg.ClusterConfiguration),
 			sandboxImage:    images.GetPauseImage(&cfg.ClusterConfiguration),
 			imagePullPolicy: cfg.NodeRegistration.ImagePullPolicy,
+			imagePullSerial: serialPull,
 		},
 	}
 	return RunChecks(checks, os.Stderr, ignorePreflightErrors)

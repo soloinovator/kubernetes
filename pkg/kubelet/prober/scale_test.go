@@ -38,7 +38,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
-	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // TCP sockets goes through a TIME-WAIT state (default 60 sec) before being freed,
@@ -80,7 +80,7 @@ func TestTCPPortExhaustion(t *testing.T) {
 		{"HTTP", true},
 	}
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf(tt.name), func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			testRootDir := ""
 			if tempDir, err := os.MkdirTemp("", "kubelet_test."); err != nil {
 				t.Fatalf("can't make a temp rootdir: %v", err)
@@ -136,7 +136,7 @@ func TestTCPPortExhaustion(t *testing.T) {
 								StartedAt: metav1.Now(),
 							},
 						},
-						Started: utilpointer.Bool(true),
+						Started: ptr.To(true),
 					})
 				}
 				podManager.AddPod(&pod)
@@ -257,14 +257,14 @@ func (f *fakePod) probeHandler() v1.ProbeHandler {
 		handler = v1.ProbeHandler{
 			HTTPGet: &v1.HTTPGetAction{
 				Host: "127.0.0.1",
-				Port: intstr.FromInt(port),
+				Port: intstr.FromInt32(int32(port)),
 			},
 		}
 	} else {
 		handler = v1.ProbeHandler{
 			TCPSocket: &v1.TCPSocketAction{
 				Host: "127.0.0.1",
-				Port: intstr.FromInt(port),
+				Port: intstr.FromInt32(int32(port)),
 			},
 		}
 	}

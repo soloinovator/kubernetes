@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -46,13 +47,14 @@ import (
 	"k8s.io/kubernetes/pkg/controller/podautoscaler/metrics"
 	"k8s.io/kubernetes/pkg/controller/podautoscaler/monitor"
 	"k8s.io/kubernetes/pkg/controller/util/selectors"
+	"k8s.io/kubernetes/test/utils/ktesting"
 	cmapi "k8s.io/metrics/pkg/apis/custom_metrics/v1beta2"
 	emapi "k8s.io/metrics/pkg/apis/external_metrics/v1beta1"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 	cmfake "k8s.io/metrics/pkg/client/custom_metrics/fake"
 	emfake "k8s.io/metrics/pkg/client/external_metrics/fake"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/stretchr/testify/assert"
 
@@ -80,7 +82,7 @@ func statusOkWithOverrides(overrides ...autoscalingv2.HorizontalPodAutoscalerCon
 	resv2 := make([]autoscalingv2.HorizontalPodAutoscalerCondition, len(statusOk))
 	copy(resv2, statusOk)
 	for _, override := range overrides {
-		resv2 = setConditionInList(resv2, override.Type, override.Status, override.Reason, override.Message)
+		resv2 = setConditionInList(resv2, override.Type, override.Status, override.Reason, "%s", override.Message)
 	}
 
 	// copy to a v1 slice
@@ -156,8 +158,6 @@ type testCase struct {
 
 	recommendations []timestampedRecommendation
 	hpaSelectors    *selectors.BiMultimap
-
-	containerResourceMetricsEnabled bool
 }
 
 // Needs to be called under a lock.
@@ -675,7 +675,7 @@ func findCpuUtilization(metricStatus []autoscalingv2.MetricStatus) (utilization 
 	return nil
 }
 
-func (tc *testCase) verifyResults(t *testing.T, m *mockMonitor) {
+func (tc *testCase) verifyResults(ctx context.Context, t *testing.T, m *mockMonitor) {
 	tc.Lock()
 	defer tc.Unlock()
 
@@ -685,12 +685,12 @@ func (tc *testCase) verifyResults(t *testing.T, m *mockMonitor) {
 		assert.Equal(t, tc.specReplicas != tc.expectedDesiredReplicas, tc.eventCreated, "an event should have been created only if we expected a change in replicas")
 	}
 
-	tc.verifyRecordedMetric(t, m)
+	tc.verifyRecordedMetric(ctx, t, m)
 }
 
-func (tc *testCase) verifyRecordedMetric(t *testing.T, m *mockMonitor) {
+func (tc *testCase) verifyRecordedMetric(ctx context.Context, t *testing.T, m *mockMonitor) {
 	// First, wait for the reconciliation completed at least once.
-	m.waitUntilRecorded(t)
+	m.waitUntilRecorded(ctx, t)
 
 	assert.Equal(t, tc.expectedReportedReconciliationActionLabel, m.reconciliationActionLabels[0], "the reconciliation action should be recorded in monitor expectedly")
 	assert.Equal(t, tc.expectedReportedReconciliationErrorLabel, m.reconciliationErrorLabels[0], "the reconciliation error should be recorded in monitor expectedly")
@@ -757,7 +757,7 @@ func (tc *testCase) setupController(t *testing.T) (*HorizontalController, inform
 					tc.expectedDesiredReplicas,
 					(int64(tc.reportedLevels[0])*100)/tc.reportedCPURequests[0].MilliValue(), tc.specReplicas), obj.Message)
 			default:
-				assert.False(t, true, fmt.Sprintf("Unexpected event: %s / %s", obj.Reason, obj.Message))
+				assert.False(t, true, "Unexpected event: %s / %s", obj.Reason, obj.Message)
 			}
 		}
 		tc.eventCreated = true
@@ -767,7 +767,9 @@ func (tc *testCase) setupController(t *testing.T) (*HorizontalController, inform
 	informerFactory := informers.NewSharedInformerFactory(testClient, controller.NoResyncPeriodFunc())
 	defaultDownscalestabilizationWindow := 5 * time.Minute
 
+	tCtx := ktesting.Init(t)
 	hpaController := NewHorizontalController(
+		tCtx,
 		eventClient.CoreV1(),
 		testScaleClient,
 		testClient.AutoscalingV2(),
@@ -780,7 +782,6 @@ func (tc *testCase) setupController(t *testing.T) (*HorizontalController, inform
 		defaultTestingTolerance,
 		defaultTestingCPUInitializationPeriod,
 		defaultTestingDelayOfInitialReadinessStatus,
-		tc.containerResourceMetricsEnabled,
 	)
 	hpaController.hpaListerSynced = alwaysReady
 	if tc.recommendations != nil {
@@ -832,7 +833,7 @@ func (tc *testCase) runTestWithController(t *testing.T, hpaController *Horizonta
 	if !ok {
 		t.Fatalf("test HPA controller should have mockMonitor, but actually not")
 	}
-	tc.verifyResults(t, m)
+	tc.verifyResults(ctx, t, m)
 }
 
 func (tc *testCase) runTest(t *testing.T) {
@@ -874,8 +875,8 @@ func (m *mockMonitor) ObserveMetricComputationResult(action monitor.ActionLabel,
 }
 
 // waitUntilRecorded waits for the HPA controller to reconcile at least once.
-func (m *mockMonitor) waitUntilRecorded(t *testing.T) {
-	if err := wait.Poll(20*time.Millisecond, 100*time.Millisecond, func() (done bool, err error) {
+func (m *mockMonitor) waitUntilRecorded(ctx context.Context, t *testing.T) {
+	if err := wait.PollUntilContextTimeout(ctx, 20*time.Millisecond, 100*time.Millisecond, true, func(ctx context.Context) (done bool, err error) {
 		m.RWMutex.RLock()
 		defer m.RWMutex.RUnlock()
 		if len(m.reconciliationActionLabels) == 0 || len(m.reconciliationErrorLabels) == 0 {
@@ -924,15 +925,14 @@ func TestScaleUpContainer(t *testing.T) {
 				Name: v1.ResourceCPU,
 				Target: autoscalingv2.MetricTarget{
 					Type:               autoscalingv2.UtilizationMetricType,
-					AverageUtilization: pointer.Int32(30),
+					AverageUtilization: ptr.To(int32(30)),
 				},
 				Container: "container1",
 			},
 		}},
-		reportedLevels:                            []uint64{300, 500, 700},
-		reportedCPURequests:                       []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		useMetricsAPI:                             true,
-		containerResourceMetricsEnabled:           true,
+		reportedLevels:      []uint64{300, 500, 700},
+		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
+		useMetricsAPI:       true,
 		expectedReportedReconciliationActionLabel: monitor.ActionLabelScaleUp,
 		expectedReportedReconciliationErrorLabel:  monitor.ErrorLabelNone,
 		expectedReportedMetricComputationActionLabels: map[autoscalingv2.MetricSourceType]monitor.ActionLabel{
@@ -942,46 +942,6 @@ func TestScaleUpContainer(t *testing.T) {
 			autoscalingv2.ContainerResourceMetricSourceType: monitor.ErrorLabelNone,
 		},
 	}
-	tc.runTest(t)
-}
-
-func TestContainerMetricWithTheFeatureGateDisabled(t *testing.T) {
-	// In this test case, the container metrics will be ignored
-	// and only the CPUTarget will be taken into consideration.
-
-	tc := testCase{
-		minReplicas:             2,
-		maxReplicas:             6,
-		specReplicas:            3,
-		statusReplicas:          3,
-		expectedDesiredReplicas: 4,
-		CPUTarget:               30,
-		verifyCPUCurrent:        true,
-		metricsTarget: []autoscalingv2.MetricSpec{{
-			Type: autoscalingv2.ContainerResourceMetricSourceType,
-			ContainerResource: &autoscalingv2.ContainerResourceMetricSource{
-				Name: v1.ResourceCPU,
-				Target: autoscalingv2.MetricTarget{
-					Type:               autoscalingv2.UtilizationMetricType,
-					AverageUtilization: pointer.Int32(10),
-				},
-				Container: "container1",
-			},
-		}},
-		reportedLevels:      []uint64{300, 400, 500},
-		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
-		expectedReportedReconciliationActionLabel: monitor.ActionLabelScaleUp,
-		expectedReportedReconciliationErrorLabel:  monitor.ErrorLabelInternal,
-		expectedReportedMetricComputationActionLabels: map[autoscalingv2.MetricSourceType]monitor.ActionLabel{
-			autoscalingv2.ResourceMetricSourceType:          monitor.ActionLabelScaleUp,
-			autoscalingv2.ContainerResourceMetricSourceType: monitor.ActionLabelNone,
-		},
-		expectedReportedMetricComputationErrorLabels: map[autoscalingv2.MetricSourceType]monitor.ErrorLabel{
-			autoscalingv2.ResourceMetricSourceType:          monitor.ErrorLabelNone,
-			autoscalingv2.ContainerResourceMetricSourceType: monitor.ErrorLabelInternal,
-		},
-	}
-
 	tc.runTest(t)
 }
 
@@ -1659,13 +1619,12 @@ func TestScaleDownContainerResource(t *testing.T) {
 				Name:      v1.ResourceCPU,
 				Target: autoscalingv2.MetricTarget{
 					Type:               autoscalingv2.UtilizationMetricType,
-					AverageUtilization: pointer.Int32(50),
+					AverageUtilization: ptr.To(int32(50)),
 				},
 			},
 		}},
-		useMetricsAPI:                             true,
-		containerResourceMetricsEnabled:           true,
-		recommendations:                           []timestampedRecommendation{},
+		useMetricsAPI:   true,
+		recommendations: []timestampedRecommendation{},
 		expectedReportedReconciliationActionLabel: monitor.ActionLabelScaleDown,
 		expectedReportedReconciliationErrorLabel:  monitor.ErrorLabelNone,
 		expectedReportedMetricComputationActionLabels: map[autoscalingv2.MetricSourceType]monitor.ActionLabel{
@@ -2858,6 +2817,10 @@ func TestUpscaleCap(t *testing.T) {
 }
 
 func TestUpscaleCapGreaterThanMaxReplicas(t *testing.T) {
+	// TODO: Remove skip once this issue is resolved: https://github.com/kubernetes/kubernetes/issues/124083
+	if goruntime.GOOS == "windows" {
+		t.Skip("Skip flaking test on Windows.")
+	}
 	tc := testCase{
 		minReplicas:     1,
 		maxReplicas:     20,
@@ -2889,6 +2852,10 @@ func TestUpscaleCapGreaterThanMaxReplicas(t *testing.T) {
 }
 
 func TestMoreReplicasThanSpecNoScale(t *testing.T) {
+	// TODO: Remove skip once this issue is resolved: https://github.com/kubernetes/kubernetes/issues/124083
+	if goruntime.GOOS == "windows" {
+		t.Skip("Skip flaking test on Windows.")
+	}
 	tc := testCase{
 		minReplicas:             1,
 		maxReplicas:             8,
@@ -3881,7 +3848,7 @@ func TestCalculateScaleUpLimitWithScalingRules(t *testing.T) {
 	policy := autoscalingv2.MinChangePolicySelect
 
 	calculated := calculateScaleUpLimitWithScalingRules(1, []timestampedScaleEvent{}, []timestampedScaleEvent{}, &autoscalingv2.HPAScalingRules{
-		StabilizationWindowSeconds: pointer.Int32(300),
+		StabilizationWindowSeconds: ptr.To(int32(300)),
 		SelectPolicy:               &policy,
 		Policies: []autoscalingv2.HPAScalingPolicy{
 			{
@@ -3896,14 +3863,14 @@ func TestCalculateScaleUpLimitWithScalingRules(t *testing.T) {
 			},
 		},
 	})
-	assert.Equal(t, calculated, int32(2))
+	assert.Equal(t, int32(2), calculated)
 }
 
 func TestCalculateScaleDownLimitWithBehaviors(t *testing.T) {
 	policy := autoscalingv2.MinChangePolicySelect
 
 	calculated := calculateScaleDownLimitWithBehaviors(5, []timestampedScaleEvent{}, []timestampedScaleEvent{}, &autoscalingv2.HPAScalingRules{
-		StabilizationWindowSeconds: pointer.Int32(300),
+		StabilizationWindowSeconds: ptr.To(int32(300)),
 		SelectPolicy:               &policy,
 		Policies: []autoscalingv2.HPAScalingPolicy{
 			{
@@ -3918,13 +3885,13 @@ func TestCalculateScaleDownLimitWithBehaviors(t *testing.T) {
 			},
 		},
 	})
-	assert.Equal(t, calculated, int32(3))
+	assert.Equal(t, int32(3), calculated)
 }
 
 func generateScalingRules(pods, podsPeriod, percent, percentPeriod, stabilizationWindow int32) *autoscalingv2.HPAScalingRules {
 	policy := autoscalingv2.MaxChangePolicySelect
 	directionBehavior := autoscalingv2.HPAScalingRules{
-		StabilizationWindowSeconds: pointer.Int32(stabilizationWindow),
+		StabilizationWindowSeconds: ptr.To(int32(stabilizationWindow)),
 		SelectPolicy:               &policy,
 	}
 	if pods != 0 {
@@ -5292,7 +5259,9 @@ func TestMultipleHPAs(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactory(testClient, controller.NoResyncPeriodFunc())
 
+	tCtx := ktesting.Init(t)
 	hpaController := NewHorizontalController(
+		tCtx,
 		testClient.CoreV1(),
 		testScaleClient,
 		testClient.AutoscalingV2(),
@@ -5305,15 +5274,12 @@ func TestMultipleHPAs(t *testing.T) {
 		defaultTestingTolerance,
 		defaultTestingCPUInitializationPeriod,
 		defaultTestingDelayOfInitialReadinessStatus,
-		false,
 	)
 	hpaController.scaleUpEvents = scaleUpEventsMap
 	hpaController.scaleDownEvents = scaleDownEventsMap
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	informerFactory.Start(ctx.Done())
-	go hpaController.Run(ctx, 5)
+	informerFactory.Start(tCtx.Done())
+	go hpaController.Run(tCtx, 5)
 
 	timeoutTime := time.After(15 * time.Second)
 	timeout := false
@@ -5327,5 +5293,5 @@ func TestMultipleHPAs(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, hpaCount, len(processedHPA), "Expected to process all HPAs")
+	assert.Len(t, processedHPA, hpaCount, "Expected to process all HPAs")
 }

@@ -23,8 +23,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/klog/v2/ktesting"
+	"k8s.io/kubernetes/pkg/features"
 	clocktesting "k8s.io/utils/clock/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 func TestNewBackoffRecord(t *testing.T) {
@@ -199,8 +203,10 @@ func TestNewBackoffRecord(t *testing.T) {
 }
 
 func TestGetFinishedTime(t *testing.T) {
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SidecarContainers, true)
 	defaultTestTime := time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
 	defaultTestTimeMinus30s := defaultTestTime.Add(-30 * time.Second)
+	containerRestartPolicyAlways := v1.ContainerRestartPolicyAlways
 	testCases := map[string]struct {
 		pod            v1.Pod
 		wantFinishTime time.Time
@@ -286,7 +292,7 @@ func TestGetFinishedTime(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					DeletionTimestamp:          &metav1.Time{Time: defaultTestTime},
-					DeletionGracePeriodSeconds: pointer.Int64(30),
+					DeletionGracePeriodSeconds: ptr.To[int64](30),
 				},
 			},
 			wantFinishTime: defaultTestTimeMinus30s,
@@ -350,6 +356,39 @@ func TestGetFinishedTime(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					CreationTimestamp: metav1.Time{Time: defaultTestTime},
+				},
+			},
+			wantFinishTime: defaultTestTime,
+		},
+		// In this case, init container is stopped after the regular containers.
+		// This is because with the sidecar (restartable init) containers,
+		// sidecar containers will always finish later than regular containers.
+		"Pod with sidecar container and all containers terminated": {
+			pod: v1.Pod{
+				Spec: v1.PodSpec{
+					InitContainers: []v1.Container{
+						{
+							Name:          "sidecar",
+							RestartPolicy: &containerRestartPolicyAlways,
+						},
+					},
+				},
+				Status: v1.PodStatus{
+					ContainerStatuses: []v1.ContainerStatus{
+						{
+							State: v1.ContainerState{
+								Terminated: &v1.ContainerStateTerminated{FinishedAt: metav1.NewTime(defaultTestTime.Add(-1 * time.Second))},
+							},
+						},
+					},
+					InitContainerStatuses: []v1.ContainerStatus{
+						{
+							Name: "sidecar",
+							State: v1.ContainerState{
+								Terminated: &v1.ContainerStateTerminated{FinishedAt: metav1.NewTime(defaultTestTime)},
+							},
+						},
+					},
 				},
 			},
 			wantFinishTime: defaultTestTime,
@@ -460,6 +499,49 @@ func TestGetRemainingBackoffTime(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fakeClock := clocktesting.NewFakeClock(tc.currentTime.Truncate(time.Second))
 			d := tc.backoffRecord.getRemainingTime(fakeClock, tc.defaultBackoff, tc.maxBackoff)
+			if d.Seconds() != tc.wantDuration.Seconds() {
+				t.Errorf("Expected value of duration %v; got %v", tc.wantDuration, d)
+			}
+		})
+	}
+}
+
+func TestGetRemainingBackoffTimePerIndex(t *testing.T) {
+	defaultTestTime := metav1.NewTime(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
+	testCases := map[string]struct {
+		currentTime    time.Time
+		maxBackoff     time.Duration
+		defaultBackoff time.Duration
+		lastFailedPod  *v1.Pod
+		wantDuration   time.Duration
+	}{
+		"no failures": {
+			lastFailedPod:  nil,
+			defaultBackoff: 5 * time.Second,
+			maxBackoff:     700 * time.Second,
+			wantDuration:   0 * time.Second,
+		},
+		"two prev failures; current time and failure time are same": {
+			lastFailedPod:  buildPod().phase(v1.PodFailed).indexFailureCount("2").customDeletionTimestamp(defaultTestTime.Time).Pod,
+			currentTime:    defaultTestTime.Time,
+			defaultBackoff: 5 * time.Second,
+			maxBackoff:     700 * time.Second,
+			wantDuration:   20 * time.Second,
+		},
+		"one prev failure counted and one ignored; current time and failure time are same": {
+			lastFailedPod:  buildPod().phase(v1.PodFailed).indexFailureCount("1").indexIgnoredFailureCount("1").customDeletionTimestamp(defaultTestTime.Time).Pod,
+			currentTime:    defaultTestTime.Time,
+			defaultBackoff: 5 * time.Second,
+			maxBackoff:     700 * time.Second,
+			wantDuration:   20 * time.Second,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			logger, _ := ktesting.NewTestContext(t)
+			fakeClock := clocktesting.NewFakeClock(tc.currentTime.Truncate(time.Second))
+			d := getRemainingTimePerIndex(logger, fakeClock, tc.defaultBackoff, tc.maxBackoff, tc.lastFailedPod)
 			if d.Seconds() != tc.wantDuration.Seconds() {
 				t.Errorf("Expected value of duration %v; got %v", tc.wantDuration, d)
 			}

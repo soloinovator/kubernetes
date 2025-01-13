@@ -19,7 +19,6 @@ package csi
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -109,7 +108,6 @@ func TestMounterGetPath(t *testing.T) {
 		mounter, err := plug.NewMounter(
 			spec,
 			&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: testPodUID, Namespace: testns}},
-			volume.VolumeOptions{},
 		)
 		if err != nil {
 			t.Fatalf("Failed to make a new Mounter: %v", err)
@@ -216,7 +214,7 @@ func TestMounterSetUp(t *testing.T) {
 	currentPodInfoMount := true
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, test.enableSELinuxFeatureGate)()
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, test.enableSELinuxFeatureGate)
 
 			modes := []storage.VolumeLifecycleMode{
 				storage.VolumeLifecyclePersistent,
@@ -245,7 +243,6 @@ func TestMounterSetUp(t *testing.T) {
 						ServiceAccountName: testAccount,
 					},
 				},
-				volume.VolumeOptions{},
 			)
 			if err != nil {
 				t.Fatalf("failed to make a new Mounter: %v", err)
@@ -367,6 +364,7 @@ func TestMounterSetUp(t *testing.T) {
 func TestMounterSetUpSimple(t *testing.T) {
 	fakeClient := fakeclient.NewSimpleClientset()
 	plug, tmpDir := newTestPlugin(t, fakeClient)
+	transientError := volumetypes.NewTransientOperationFailure("")
 	defer os.RemoveAll(tmpDir)
 
 	testCases := []struct {
@@ -378,6 +376,8 @@ func TestMounterSetUpSimple(t *testing.T) {
 		spec                 func(string, []string) *volume.Spec
 		newMounterShouldFail bool
 		setupShouldFail      bool
+		unsetClient          bool
+		exitError            error
 	}{
 		{
 			name:            "setup with ephemeral source",
@@ -416,6 +416,21 @@ func TestMounterSetUpSimple(t *testing.T) {
 			newMounterShouldFail: true,
 			spec:                 func(fsType string, options []string) *volume.Spec { return nil },
 		},
+		{
+			name:   "setup with unknown CSI driver",
+			podUID: types.UID(fmt.Sprintf("%08X", rand.Uint64())),
+			mode:   storage.VolumeLifecyclePersistent,
+			fsType: "zfs",
+			spec: func(fsType string, options []string) *volume.Spec {
+				pvSrc := makeTestPV("pv1", 20, "unknown-driver", "vol1")
+				pvSrc.Spec.CSI.FSType = fsType
+				pvSrc.Spec.MountOptions = options
+				return volume.NewSpecFromPersistentVolume(pvSrc, false)
+			},
+			setupShouldFail: true,
+			unsetClient:     true,
+			exitError:       transientError,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -424,7 +439,6 @@ func TestMounterSetUpSimple(t *testing.T) {
 			mounter, err := plug.NewMounter(
 				tc.spec(tc.fsType, tc.options),
 				&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: tc.podUID, Namespace: testns}},
-				volume.VolumeOptions{},
 			)
 			if tc.newMounterShouldFail && err != nil {
 				t.Log(err)
@@ -451,13 +465,26 @@ func TestMounterSetUpSimple(t *testing.T) {
 				t.Fatalf("failed to setup VolumeAttachment: %v", err)
 			}
 
+			if tc.unsetClient {
+				// Clear out the clients
+				csiMounter.csiClient = nil
+				csiMounter.csiClientGetter.csiClient = nil
+				t.Log("driver name is ", csiMounter.csiClientGetter.driverName)
+			}
+
 			// Mounter.SetUp()
 			err = csiMounter.SetUp(volume.MounterArgs{})
-			if tc.setupShouldFail && err != nil {
-				t.Log(err)
-				return
-			}
-			if !tc.setupShouldFail && err != nil {
+			if tc.setupShouldFail {
+				if err != nil {
+					if tc.exitError != nil && reflect.TypeOf(tc.exitError) != reflect.TypeOf(err) {
+						t.Fatalf("expected exitError type: %v got: %v (%v)", reflect.TypeOf(tc.exitError), reflect.TypeOf(err), err)
+					}
+					t.Log(err)
+					return
+				} else {
+					t.Error("test should fail, but no error occurred")
+				}
+			} else if err != nil {
 				t.Fatal("unexpected error:", err)
 			}
 
@@ -593,7 +620,6 @@ func TestMounterSetupWithStatusTracking(t *testing.T) {
 			mounter, err := plug.NewMounter(
 				tc.spec("ext4", []string{}),
 				&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: tc.podUID, Namespace: testns}},
-				volume.VolumeOptions{},
 			)
 			if err != nil {
 				t.Fatalf("failed to create CSI mounter: %v", err)
@@ -694,7 +720,6 @@ func TestMounterSetUpWithInline(t *testing.T) {
 			mounter, err := plug.NewMounter(
 				tc.spec(tc.fsType, tc.options),
 				&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: tc.podUID, Namespace: testns}},
-				volume.VolumeOptions{},
 			)
 			if tc.shouldFail && err != nil {
 				t.Log(err)
@@ -836,6 +861,15 @@ func TestMounterSetUpWithFSGroup(t *testing.T) {
 			fsGroup:    3000,
 		},
 		{
+			name: "fstype, fsgroup, RWOP provided (should apply fsgroup)",
+			accessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOncePod,
+			},
+			fsType:     "ext4",
+			setFsGroup: true,
+			fsGroup:    3000,
+		},
+		{
 			name: "fstype, fsgroup, RWO provided, FSGroupPolicy ReadWriteOnceWithFSType (should apply fsgroup)",
 			accessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
@@ -958,7 +992,6 @@ func TestMounterSetUpWithFSGroup(t *testing.T) {
 		mounter, err := plug.NewMounter(
 			spec,
 			&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: testPodUID, Namespace: testns}},
-			volume.VolumeOptions{},
 		)
 		if err != nil {
 			t.Fatalf("Failed to make a new Mounter: %v", err)
@@ -1064,8 +1097,66 @@ func TestUnmounterTeardown(t *testing.T) {
 
 }
 
+func TestUnmounterTeardownNoClientError(t *testing.T) {
+	transientError := volumetypes.NewTransientOperationFailure("")
+	plug, tmpDir := newTestPlugin(t, nil)
+	defer os.RemoveAll(tmpDir)
+	registerFakePlugin(testDriver, "endpoint", []string{"1.0.0"}, t)
+	pv := makeTestPV("test-pv", 10, testDriver, testVol)
+
+	// save the data file prior to unmount
+	targetDir := getTargetPath(testPodUID, pv.ObjectMeta.Name, plug.host)
+	dir := filepath.Join(targetDir, "mount")
+	if err := os.MkdirAll(dir, 0755); err != nil && !os.IsNotExist(err) {
+		t.Errorf("failed to create dir [%s]: %v", dir, err)
+	}
+
+	// do a fake local mount
+	diskMounter := util.NewSafeFormatAndMountFromHost(plug.GetPluginName(), plug.host)
+	device := "/fake/device"
+	if goruntime.GOOS == "windows" {
+		// We need disk numbers on Windows.
+		device = "1"
+	}
+	if err := diskMounter.FormatAndMount(device, dir, "testfs", nil); err != nil {
+		t.Errorf("failed to mount dir [%s]: %v", dir, err)
+	}
+
+	if err := saveVolumeData(
+		targetDir,
+		volDataFileName,
+		map[string]string{
+			volDataKey.specVolID:  pv.ObjectMeta.Name,
+			volDataKey.driverName: testDriver,
+			volDataKey.volHandle:  testVol,
+		},
+	); err != nil {
+		t.Fatalf("failed to save volume data: %v", err)
+	}
+
+	unmounter, err := plug.NewUnmounter(pv.ObjectMeta.Name, testPodUID)
+	if err != nil {
+		t.Fatalf("failed to make a new Unmounter: %v", err)
+	}
+
+	csiUnmounter := unmounter.(*csiMountMgr)
+
+	// Clear out the cached client
+	// The lookup to generate a new client will fail when it tries to query a driver with an unknown name
+	csiUnmounter.csiClientGetter.csiClient = nil
+	// Note that registerFakePlugin above will create a driver with a name of "test-driver"
+	csiUnmounter.csiClientGetter.driverName = "unknown-driver"
+
+	err = csiUnmounter.TearDownAt(dir)
+	if err == nil {
+		t.Errorf("test should fail, but no error occurred")
+	} else if reflect.TypeOf(transientError) != reflect.TypeOf(err) {
+		t.Fatalf("expected exitError type: %v got: %v (%v)", reflect.TypeOf(transientError), reflect.TypeOf(err), err)
+	}
+}
+
 func TestIsCorruptedDir(t *testing.T) {
-	existingMountPath, err := ioutil.TempDir(os.TempDir(), "blobfuse-csi-mount-test")
+	existingMountPath, err := os.MkdirTemp(os.TempDir(), "blobfuse-csi-mount-test")
 	if err != nil {
 		t.Fatalf("failed to create tmp dir: %v", err)
 	}
@@ -1184,7 +1275,6 @@ func TestPodServiceAccountTokenAttrs(t *testing.T) {
 						ServiceAccountName: testAccount,
 					},
 				},
-				volume.VolumeOptions{},
 			)
 			if err != nil {
 				t.Fatalf("Failed to create a csi mounter, err: %v", err)
@@ -1401,7 +1491,6 @@ func TestMounterGetFSGroupPolicy(t *testing.T) {
 		mounter, err := plug.NewMounter(
 			volume.NewSpecFromPersistentVolume(makeTestPV("test.vol.id", 20, testDriver, "testvol-handle1"), true),
 			&corev1.Pod{ObjectMeta: meta.ObjectMeta{UID: "1", Namespace: testns}},
-			volume.VolumeOptions{},
 		)
 		if err != nil {
 			t.Fatalf("Error creating a new mounter: %s", err)

@@ -91,6 +91,10 @@ func runPreflight(c workflow.RunData) error {
 
 	// Start with general checks
 	klog.V(1).Infoln("[preflight] Running general checks")
+	// First, check if we're root separately from the other preflight checks and fail fast.
+	if err := preflight.RunRootCheckOnly(j.IgnorePreflightErrors()); err != nil {
+		return err
+	}
 	if err := preflight.RunJoinNodeChecks(utilsexec.New(), j.Cfg(), j.IgnorePreflightErrors()); err != nil {
 		return err
 	}
@@ -131,7 +135,7 @@ func runPreflight(c workflow.RunData) error {
 
 		fmt.Println("[preflight] Pulling images required for setting up a Kubernetes cluster")
 		fmt.Println("[preflight] This might take a minute or two, depending on the speed of your internet connection")
-		fmt.Println("[preflight] You can also perform this action in beforehand using 'kubeadm config images pull'")
+		fmt.Println("[preflight] You can also perform this action beforehand using 'kubeadm config images pull'")
 		if err := preflight.RunPullImagesCheck(utilsexec.New(), initCfg, j.IgnorePreflightErrors()); err != nil {
 			return err
 		}

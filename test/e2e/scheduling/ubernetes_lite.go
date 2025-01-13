@@ -24,6 +24,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -43,7 +44,7 @@ import (
 
 var _ = SIGDescribe("Multi-AZ Clusters", func() {
 	f := framework.NewDefaultFramework("multi-az")
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelBaseline
+	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 	var zoneCount int
 	var err error
 	var zoneNames sets.Set[string]
@@ -68,12 +69,12 @@ var _ = SIGDescribe("Multi-AZ Clusters", func() {
 		err = createBalancedPodForNodes(ctx, f, cs, f.Namespace.Name, nodeList.Items, podRequestedResource, 0.0)
 		framework.ExpectNoError(err)
 	})
-	ginkgo.It("should spread the pods of a service across zones [Serial]", func(ctx context.Context) {
+	f.It("should spread the pods of a service across zones", f.WithSerial(), func(ctx context.Context) {
 		SpreadServiceOrFail(ctx, f, 5*zoneCount, zoneNames, imageutils.GetPauseImageName())
 	})
 
-	ginkgo.It("should spread the pods of a replication controller across zones [Serial]", func(ctx context.Context) {
-		SpreadRCOrFail(ctx, f, int32(5*zoneCount), zoneNames, framework.ServeHostnameImage, []string{"serve-hostname"})
+	f.It("should spread the pods of a replication controller across zones", f.WithSerial(), func(ctx context.Context) {
+		SpreadRCOrFail(ctx, f, int32(5*zoneCount), zoneNames, imageutils.GetE2EImage(imageutils.Agnhost), []string{"serve-hostname"})
 	})
 })
 
@@ -93,7 +94,7 @@ func SpreadServiceOrFail(ctx context.Context, f *framework.Framework, replicaCou
 			},
 			Ports: []v1.ServicePort{{
 				Port:       80,
-				TargetPort: intstr.FromInt(80),
+				TargetPort: intstr.FromInt32(80),
 			}},
 		},
 	}

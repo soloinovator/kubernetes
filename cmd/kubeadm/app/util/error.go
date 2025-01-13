@@ -38,8 +38,8 @@ const (
 )
 
 var (
-	ErrInvalidSubCommandMsg = "invalid subcommand"
-	ErrExit                 = errors.New("exit")
+	// ErrExit is an error returned when kubeadm is about to exit
+	ErrExit = errors.New("exit")
 )
 
 // fatal prints the message if set and then exits.
@@ -73,40 +73,34 @@ type preflightError interface {
 // checkErr formats a given error as a string and calls the passed handleErr
 // func with that string and an exit code.
 func checkErr(err error, handleErr func(string, int)) {
+	if err == nil {
+		return
+	}
 
-	var msg string
-	if err != nil {
-		msg = fmt.Sprintf("%s\nTo see the stack trace of this error execute with --v=5 or higher", err.Error())
-		// check if the verbosity level in klog is high enough and print a stack trace.
-		f := flag.CommandLine.Lookup("v")
-		if f != nil {
-			// assume that the "v" flag contains a parseable Int32 as per klog's "Level" type alias,
-			// thus no error from ParseInt is handled here.
-			if v, e := strconv.ParseInt(f.Value.String(), 10, 32); e == nil {
-				// https://git.k8s.io/community/contributors/devel/sig-instrumentation/logging.md
-				// klog.V(5) - Trace level verbosity
-				if v > 4 {
-					msg = fmt.Sprintf("%+v", err)
-				}
+	msg := fmt.Sprintf("%s\nTo see the stack trace of this error execute with --v=5 or higher", err.Error())
+	// Check if the verbosity level in klog is high enough and print a stack trace.
+	f := flag.CommandLine.Lookup("v")
+	if f != nil {
+		// Assume that the "v" flag contains a parsable Int32 as per klog's "Level" type alias,
+		// thus no error from ParseInt is handled here.
+		if v, e := strconv.ParseInt(f.Value.String(), 10, 32); e == nil {
+			// https://git.k8s.io/community/contributors/devel/sig-instrumentation/logging.md
+			// klog.V(5) - Trace level verbosity
+			if v > 4 {
+				msg = fmt.Sprintf("%+v", err)
 			}
 		}
 	}
 
-	if err == nil {
-		return
-	}
 	switch {
 	case err == ErrExit:
 		handleErr("", DefaultErrorExitCode)
-	case strings.Contains(err.Error(), ErrInvalidSubCommandMsg):
-		handleErr(err.Error(), DefaultErrorExitCode)
 	default:
 		switch err.(type) {
 		case preflightError:
 			handleErr(msg, PreFlightExitCode)
 		case errorsutil.Aggregate:
 			handleErr(msg, ValidationExitCode)
-
 		default:
 			handleErr(msg, DefaultErrorExitCode)
 		}

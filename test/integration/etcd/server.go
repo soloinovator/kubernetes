@@ -18,15 +18,12 @@ package etcd
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
-
-	utiltesting "k8s.io/client-go/util/testing"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -38,17 +35,25 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/json"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	genericapiserveroptions "k8s.io/apiserver/pkg/server/options"
+	"k8s.io/apiserver/pkg/util/feature"
 	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+	utiltesting "k8s.io/client-go/util/testing"
+	"k8s.io/component-base/featuregate"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	utilversion "k8s.io/component-base/version"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 	"k8s.io/kubernetes/test/integration"
 	"k8s.io/kubernetes/test/integration/framework"
+	"k8s.io/kubernetes/test/utils/ktesting"
 	netutils "k8s.io/utils/net"
 
 	// install all APIs
@@ -62,9 +67,23 @@ AwEHoUQDQgAEH6cuzP8XuD5wal6wf9M6xDljTOPLX2i8uIp/C/ASqiIGUeeKQtX0
 /IR3qCXyThP/dbCiHrF3v1cuhBOHY8CLVg==
 -----END EC PRIVATE KEY-----`
 
+func registerEffectiveEmulationVersion(t *testing.T) {
+	featureGate := feature.DefaultMutableFeatureGate
+	featureGate.AddMetrics()
+
+	effectiveVersion := utilversion.DefaultKubeEffectiveVersion()
+	effectiveVersion.SetEmulationVersion(featureGate.EmulationVersion())
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, featureGate, effectiveVersion.EmulationVersion())
+	featuregate.DefaultComponentGlobalsRegistry.Reset()
+	utilruntime.Must(featuregate.DefaultComponentGlobalsRegistry.Register(featuregate.DefaultKubeComponent, effectiveVersion, featureGate))
+}
+
 // StartRealAPIServerOrDie starts an API server that is appropriate for use in tests that require one of every resource
 func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRunOptions)) *APIServer {
-	certDir, err := os.MkdirTemp("", t.Name())
+	tCtx := ktesting.Init(t)
+
+	// Strip out "/" in subtests
+	certDir, err := os.MkdirTemp("", strings.ReplaceAll(t.Name(), "/", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,23 +107,23 @@ func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRu
 		t.Fatalf("write file %s failed: %v", saSigningKeyFile.Name(), err)
 	}
 
-	kubeAPIServerOptions := options.NewServerRunOptions()
-	kubeAPIServerOptions.SecureServing.Listener = listener
-	kubeAPIServerOptions.SecureServing.ServerCert.CertDirectory = certDir
-	kubeAPIServerOptions.ServiceAccountSigningKeyFile = saSigningKeyFile.Name()
-	kubeAPIServerOptions.Etcd.StorageConfig.Transport.ServerList = []string{framework.GetEtcdURL()}
-	kubeAPIServerOptions.Etcd.DefaultStorageMediaType = runtime.ContentTypeJSON // force json we can easily interpret the result in etcd
-	kubeAPIServerOptions.ServiceClusterIPRanges = defaultServiceClusterIPRange.String()
-	kubeAPIServerOptions.Authentication.APIAudiences = []string{"https://foo.bar.example.com"}
-	kubeAPIServerOptions.Authentication.ServiceAccounts.Issuers = []string{"https://foo.bar.example.com"}
-	kubeAPIServerOptions.Authentication.ServiceAccounts.KeyFiles = []string{saSigningKeyFile.Name()}
-	kubeAPIServerOptions.Authorization.Modes = []string{"RBAC"}
-	kubeAPIServerOptions.Admission.GenericAdmission.DisablePlugins = []string{"ServiceAccount"}
-	kubeAPIServerOptions.APIEnablement.RuntimeConfig["api/all"] = "true"
+	opts := options.NewServerRunOptions()
+	opts.Options.SecureServing.Listener = listener
+	opts.Options.SecureServing.ServerCert.CertDirectory = certDir
+	opts.Options.ServiceAccountSigningKeyFile = saSigningKeyFile.Name()
+	opts.Options.Etcd.StorageConfig.Transport.ServerList = []string{framework.GetEtcdURL()}
+	opts.Options.Etcd.DefaultStorageMediaType = runtime.ContentTypeJSON // force json we can easily interpret the result in etcd
+	opts.ServiceClusterIPRanges = defaultServiceClusterIPRange.String()
+	opts.Options.Authentication.APIAudiences = []string{"https://foo.bar.example.com"}
+	opts.Options.Authentication.ServiceAccounts.Issuers = []string{"https://foo.bar.example.com"}
+	opts.Options.Authentication.ServiceAccounts.KeyFiles = []string{saSigningKeyFile.Name()}
+	opts.Options.Authorization.Modes = []string{"RBAC"}
+	opts.Options.Admission.GenericAdmission.DisablePlugins = []string{"ServiceAccount"}
+	opts.Options.APIEnablement.RuntimeConfig["api/all"] = "true"
 	for _, f := range configFuncs {
-		f(kubeAPIServerOptions)
+		f(opts)
 	}
-	completedOptions, err := app.Complete(kubeAPIServerOptions)
+	completedOptions, err := opts.Complete(tCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +167,6 @@ func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRu
 
 	kubeClient := clientset.NewForConfigOrDie(kubeClientConfig)
 
-	stopCh := make(chan struct{})
 	errCh := make(chan error)
 	go func() {
 		// Catch panics that occur in this go routine so we get a comprehensible failure
@@ -164,7 +182,7 @@ func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRu
 			errCh <- err
 			return
 		}
-		if err := prepared.Run(stopCh); err != nil {
+		if err := prepared.Run(tCtx); err != nil {
 			errCh <- err
 			t.Error(err)
 			return
@@ -215,9 +233,9 @@ func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRu
 	}
 
 	cleanup := func() {
-		// Closing stopCh is stopping apiserver and cleaning up
+		// Cancel stopping apiserver and cleaning up
 		// after itself, including shutting down its storage layer.
-		close(stopCh)
+		tCtx.Cancel("cleaning up")
 
 		// If the apiserver was started, let's wait for it to
 		// shutdown clearly.

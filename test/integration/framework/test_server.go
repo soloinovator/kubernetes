@@ -28,7 +28,9 @@ import (
 
 	"github.com/google/uuid"
 
+	apiextensionsapiserver "k8s.io/apiextensions-apiserver/pkg/apiserver"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	genericapiserver "k8s.io/apiserver/pkg/server"
@@ -36,11 +38,16 @@ import (
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/cert"
+	aggregatorscheme "k8s.io/kube-aggregator/pkg/apiserver/scheme"
+	netutils "k8s.io/utils/net"
+
 	"k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/controlplane"
+	controlplaneapiserver "k8s.io/kubernetes/pkg/controlplane/apiserver"
+	generatedopenapi "k8s.io/kubernetes/pkg/generated/openapi"
 	"k8s.io/kubernetes/test/utils"
-	netutils "k8s.io/utils/net"
 )
 
 // This key is for testing purposes only and is not considered secure.
@@ -59,6 +66,7 @@ type TestServerSetup struct {
 type TearDownFunc func()
 
 // StartTestServer runs a kube-apiserver, optionally calling out to the setup.ModifyServerRunOptions and setup.ModifyServerConfig functions
+// TODO (pohly): convert to ktesting contexts
 func StartTestServer(ctx context.Context, t testing.TB, setup TestServerSetup) (client.Interface, *rest.Config, TearDownFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -127,30 +135,30 @@ func StartTestServer(ctx context.Context, t testing.TB, setup TestServerSetup) (
 		t.Fatalf("write file %s failed: %v", saSigningKeyFile.Name(), err)
 	}
 
-	kubeAPIServerOptions := options.NewServerRunOptions()
-	kubeAPIServerOptions.SecureServing.Listener = listener
-	kubeAPIServerOptions.SecureServing.BindAddress = netutils.ParseIPSloppy("127.0.0.1")
-	kubeAPIServerOptions.SecureServing.ServerCert.CertDirectory = certDir
-	kubeAPIServerOptions.ServiceAccountSigningKeyFile = saSigningKeyFile.Name()
-	kubeAPIServerOptions.Etcd.StorageConfig.Prefix = path.Join("/", uuid.New().String(), "registry")
-	kubeAPIServerOptions.Etcd.StorageConfig.Transport.ServerList = []string{GetEtcdURL()}
-	kubeAPIServerOptions.ServiceClusterIPRanges = defaultServiceClusterIPRange.String()
-	kubeAPIServerOptions.Authentication.RequestHeader.UsernameHeaders = []string{"X-Remote-User"}
-	kubeAPIServerOptions.Authentication.RequestHeader.GroupHeaders = []string{"X-Remote-Group"}
-	kubeAPIServerOptions.Authentication.RequestHeader.ExtraHeaderPrefixes = []string{"X-Remote-Extra-"}
-	kubeAPIServerOptions.Authentication.RequestHeader.AllowedNames = []string{"kube-aggregator"}
-	kubeAPIServerOptions.Authentication.RequestHeader.ClientCAFile = proxyCACertFile.Name()
-	kubeAPIServerOptions.Authentication.APIAudiences = []string{"https://foo.bar.example.com"}
-	kubeAPIServerOptions.Authentication.ServiceAccounts.Issuers = []string{"https://foo.bar.example.com"}
-	kubeAPIServerOptions.Authentication.ServiceAccounts.KeyFiles = []string{saSigningKeyFile.Name()}
-	kubeAPIServerOptions.Authentication.ClientCert.ClientCA = clientCACertFile.Name()
-	kubeAPIServerOptions.Authorization.Modes = []string{"Node", "RBAC"}
+	opts := options.NewServerRunOptions()
+	opts.SecureServing.Listener = listener
+	opts.SecureServing.BindAddress = netutils.ParseIPSloppy("127.0.0.1")
+	opts.SecureServing.ServerCert.CertDirectory = certDir
+	opts.ServiceAccountSigningKeyFile = saSigningKeyFile.Name()
+	opts.Etcd.StorageConfig.Prefix = path.Join("/", uuid.New().String(), "registry")
+	opts.Etcd.StorageConfig.Transport.ServerList = []string{GetEtcdURL()}
+	opts.ServiceClusterIPRanges = defaultServiceClusterIPRange.String()
+	opts.Authentication.RequestHeader.UsernameHeaders = []string{"X-Remote-User"}
+	opts.Authentication.RequestHeader.GroupHeaders = []string{"X-Remote-Group"}
+	opts.Authentication.RequestHeader.ExtraHeaderPrefixes = []string{"X-Remote-Extra-"}
+	opts.Authentication.RequestHeader.AllowedNames = []string{"kube-aggregator"}
+	opts.Authentication.RequestHeader.ClientCAFile = proxyCACertFile.Name()
+	opts.Authentication.APIAudiences = []string{"https://foo.bar.example.com"}
+	opts.Authentication.ServiceAccounts.Issuers = []string{"https://foo.bar.example.com"}
+	opts.Authentication.ServiceAccounts.KeyFiles = []string{saSigningKeyFile.Name()}
+	opts.Authentication.ClientCert.ClientCA = clientCACertFile.Name()
+	opts.Authorization.Modes = []string{"Node", "RBAC"}
 
 	if setup.ModifyServerRunOptions != nil {
-		setup.ModifyServerRunOptions(kubeAPIServerOptions)
+		setup.ModifyServerRunOptions(opts)
 	}
 
-	completedOptions, err := app.Complete(kubeAPIServerOptions)
+	completedOptions, err := opts.Complete(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +167,17 @@ func StartTestServer(ctx context.Context, t testing.TB, setup TestServerSetup) (
 		t.Fatalf("failed to validate ServerRunOptions: %v", utilerrors.NewAggregate(errs))
 	}
 
-	kubeAPIServerConfig, _, _, err := app.CreateKubeAPIServerConfig(completedOptions)
+	genericConfig, versionedInformers, storageFactory, err := controlplaneapiserver.BuildGenericConfig(
+		completedOptions.CompletedOptions,
+		[]*runtime.Scheme{legacyscheme.Scheme, apiextensionsapiserver.Scheme, aggregatorscheme.Scheme},
+		controlplane.DefaultAPIResourceConfigSource(),
+		generatedopenapi.GetOpenAPIDefinitions,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeAPIServerConfig, _, _, err := app.CreateKubeAPIServerConfig(completedOptions, genericConfig, versionedInformers, storageFactory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +193,13 @@ func StartTestServer(ctx context.Context, t testing.TB, setup TestServerSetup) (
 	errCh = make(chan error)
 	go func() {
 		defer close(errCh)
-		if err := kubeAPIServer.GenericAPIServer.PrepareRun().Run(ctx.Done()); err != nil {
+		if err := kubeAPIServer.ControlPlane.GenericAPIServer.PrepareRun().RunWithContext(ctx); err != nil {
 			errCh <- err
 		}
 	}()
 
 	// Adjust the loopback config for external use (external server name and CA)
-	kubeAPIServerClientConfig := rest.CopyConfig(kubeAPIServerConfig.GenericConfig.LoopbackClientConfig)
+	kubeAPIServerClientConfig := rest.CopyConfig(kubeAPIServerConfig.ControlPlane.Generic.LoopbackClientConfig)
 	kubeAPIServerClientConfig.CAFile = path.Join(certDir, "apiserver.crt")
 	kubeAPIServerClientConfig.CAData = nil
 	kubeAPIServerClientConfig.ServerName = ""

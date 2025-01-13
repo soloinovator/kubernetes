@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 /*
 Copyright 2022 The Kubernetes Authors.
 
@@ -370,6 +373,7 @@ func TestKMSOperationsMetric(t *testing.T) {
 	}
 	defer destroyService(service)
 	metrics.RegisterMetrics()
+	metrics.KMSOperationsLatencyMetric.Reset() // support running `go test -count X`
 
 	testCases := []struct {
 		name        string

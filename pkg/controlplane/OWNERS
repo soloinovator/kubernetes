@@ -8,6 +8,7 @@ approvers:
   - wojtek-t
   - jpbetz
 reviewers:
+  - aojea
   - thockin
   - smarterclayton
   - wojtek-t
@@ -23,7 +24,6 @@ reviewers:
   - luxas
   - janetkuo
   - justinsb
-  - ncdc
   - mwielgus
   - soltysh
   - enj
@@ -33,3 +33,5 @@ labels:
 emeritus_approvers:
   - nikhiljindal
   - lavalamp
+emeritus_reviewers:
+  - ncdc

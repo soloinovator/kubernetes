@@ -32,7 +32,6 @@ import (
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	commontest "k8s.io/kubernetes/test/e2e/common"
-	e2egpu "k8s.io/kubernetes/test/e2e/framework/gpu"
 	e2emanifest "k8s.io/kubernetes/test/e2e/framework/manifest"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2etestfiles "k8s.io/kubernetes/test/e2e/framework/testfiles"
@@ -52,10 +51,9 @@ const (
 // before test running so that the image pulling won't fail in actual test.
 var NodePrePullImageList = sets.NewString(
 	imageutils.GetE2EImage(imageutils.Agnhost),
-	"gcr.io/cadvisor/cadvisor:v0.43.0",
-	"registry.k8s.io/stress:v1",
+	"gcr.io/cadvisor/cadvisor:v0.47.2",
 	busyboxImage,
-	"registry.k8s.io/busybox@sha256:4bdd623e848417d96127e16037743f0cd8b528c026e9175e22a84f639eca58ff",
+	"registry.k8s.io/e2e-test-images/busybox@sha256:a9155b13325b2abef48e71de77bb8ac015412a566829f621d06bfae5c699b1b9",
 	imageutils.GetE2EImage(imageutils.Nginx),
 	imageutils.GetE2EImage(imageutils.Perl),
 	imageutils.GetE2EImage(imageutils.Nonewprivs),
@@ -84,11 +82,6 @@ func updateImageAllowList(ctx context.Context) {
 	} else {
 		e2epod.ImagePrePullList.Insert(sriovDevicePluginImage)
 	}
-	if gpuDevicePluginImage, err := getGPUDevicePluginImage(ctx); err != nil {
-		klog.Errorln(err)
-	} else {
-		e2epod.ImagePrePullList.Insert(gpuDevicePluginImage)
-	}
 	if samplePluginImage, err := getContainerImageFromE2ETestDaemonset(SampleDevicePluginDSYAML); err != nil {
 		klog.Errorln(err)
 	} else {
@@ -106,7 +99,7 @@ func isRunningOnArm64() bool {
 }
 
 func getNodeProblemDetectorImage() string {
-	const defaultImage string = "registry.k8s.io/node-problem-detector/node-problem-detector:v0.8.7"
+	const defaultImage string = "registry.k8s.io/node-problem-detector/node-problem-detector:v0.8.20"
 	image := os.Getenv("NODE_PROBLEM_DETECTOR_IMAGE")
 	if image == "" {
 		image = defaultImage
@@ -117,7 +110,9 @@ func getNodeProblemDetectorImage() string {
 // puller represents a generic image puller
 type puller interface {
 	// Pull pulls an image by name
-	Pull(image string) ([]byte, error)
+	Pull(ctx context.Context, image string) ([]byte, error)
+	// Remove removes an image by name
+	Remove(ctx context.Context, image string) error
 	// Name returns the name of the specific puller implementation
 	Name() string
 }
@@ -130,13 +125,17 @@ func (rp *remotePuller) Name() string {
 	return "CRI"
 }
 
-func (rp *remotePuller) Pull(image string) ([]byte, error) {
-	resp, err := rp.imageService.ImageStatus(context.Background(), &runtimeapi.ImageSpec{Image: image}, false)
+func (rp *remotePuller) Pull(ctx context.Context, image string) ([]byte, error) {
+	resp, err := rp.imageService.ImageStatus(ctx, &runtimeapi.ImageSpec{Image: image}, false)
 	if err == nil && resp.GetImage() != nil {
 		return nil, nil
 	}
-	_, err = rp.imageService.PullImage(context.Background(), &runtimeapi.ImageSpec{Image: image}, nil, nil)
+	_, err = rp.imageService.PullImage(ctx, &runtimeapi.ImageSpec{Image: image}, nil, nil)
 	return nil, err
+}
+
+func (rp *remotePuller) Remove(ctx context.Context, image string) error {
+	return rp.imageService.RemoveImage(ctx, &runtimeapi.ImageSpec{Image: image})
 }
 
 func getPuller() (puller, error) {
@@ -150,7 +149,7 @@ func getPuller() (puller, error) {
 }
 
 // PrePullAllImages pre-fetches all images tests depend on so that we don't fail in an actual test.
-func PrePullAllImages() error {
+func PrePullAllImages(ctx context.Context) error {
 	puller, err := getPuller()
 	if err != nil {
 		return err
@@ -198,7 +197,7 @@ func PrePullAllImages() error {
 					if retryCount > 0 {
 						time.Sleep(imagePullRetryDelay)
 					}
-					if output, pullErr = puller.Pull(images[i]); pullErr == nil {
+					if output, pullErr = puller.Pull(ctx, images[i]); pullErr == nil {
 						break
 					}
 					klog.Warningf("Failed to pull %s as user %q, retrying in %s (%d of %d): %v",
@@ -218,19 +217,12 @@ func PrePullAllImages() error {
 	return utilerrors.NewAggregate(pullErrs)
 }
 
-// getGPUDevicePluginImage returns the image of GPU device plugin.
-func getGPUDevicePluginImage(ctx context.Context) (string, error) {
-	ds, err := e2emanifest.DaemonSetFromURL(ctx, e2egpu.GPUDevicePluginDSYAML)
+func RemoveImage(ctx context.Context, image string) error {
+	puller, err := getPuller()
 	if err != nil {
-		return "", fmt.Errorf("failed to parse the device plugin image: %w", err)
+		return err
 	}
-	if ds == nil {
-		return "", fmt.Errorf("failed to parse the device plugin image: the extracted DaemonSet is nil")
-	}
-	if len(ds.Spec.Template.Spec.Containers) < 1 {
-		return "", fmt.Errorf("failed to parse the device plugin image: cannot extract the container from YAML")
-	}
-	return ds.Spec.Template.Spec.Containers[0].Image, nil
+	return puller.Remove(ctx, image)
 }
 
 func getContainerImageFromE2ETestDaemonset(dsYamlPath string) (string, error) {

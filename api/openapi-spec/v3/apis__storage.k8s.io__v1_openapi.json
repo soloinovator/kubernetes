@@ -32,6 +32,7 @@
         "description": "AzureDisk represents an Azure Data Disk mount on the host and bind mount to the pod.",
         "properties": {
           "cachingMode": {
+            "default": "ReadWrite",
             "description": "cachingMode is the Host Caching mode: None, Read Only, Read Write.",
             "type": "string"
           },
@@ -46,14 +47,17 @@
             "type": "string"
           },
           "fsType": {
+            "default": "ext4",
             "description": "fsType is Filesystem type to mount. Must be a filesystem type supported by the host operating system. Ex. \"ext4\", \"xfs\", \"ntfs\". Implicitly inferred to be \"ext4\" if unspecified.",
             "type": "string"
           },
           "kind": {
+            "default": "Shared",
             "description": "kind expected values are Shared: multiple blob disks per storage account  Dedicated: single blob disk per storage account  Managed: azure managed data disk (only in managed availability set). defaults to shared",
             "type": "string"
           },
           "readOnly": {
+            "default": false,
             "description": "readOnly Defaults to false (read/write). ReadOnly here will force the ReadOnly setting in VolumeMounts.",
             "type": "boolean"
           }
@@ -93,7 +97,7 @@
         "type": "object"
       },
       "io.k8s.api.core.v1.CSIPersistentVolumeSource": {
-        "description": "Represents storage that is managed by an external CSI volume driver (Beta feature)",
+        "description": "Represents storage that is managed by an external CSI volume driver",
         "properties": {
           "controllerExpandSecretRef": {
             "allOf": [
@@ -126,7 +130,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.SecretReference"
               }
             ],
-            "description": "nodeExpandSecretRef is a reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI NodeExpandVolume call. This is a beta field which is enabled default by CSINodeExpandSecret feature gate. This field is optional, may be omitted if no secret is required. If the secret object contains more than one secret, all secrets are passed."
+            "description": "nodeExpandSecretRef is a reference to the secret object containing sensitive information to pass to the CSI driver to complete the CSI NodeExpandVolume call. This field is optional, may be omitted if no secret is required. If the secret object contains more than one secret, all secrets are passed."
           },
           "nodePublishSecretRef": {
             "allOf": [
@@ -177,7 +181,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "path": {
             "description": "path is Optional: Used as the mounted root, rather than the full Ceph tree, default is /",
@@ -261,7 +266,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "wwids": {
             "description": "wwids Optional: FC volume world wide identifiers (wwids) Either wwids or combination of targetWWNs and lun must be set, but not both simultaneously.",
@@ -269,7 +275,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "type": "object"
@@ -424,6 +431,7 @@
             "type": "string"
           },
           "iscsiInterface": {
+            "default": "default",
             "description": "iscsiInterface is the interface Name that uses an iSCSI transport. Defaults to 'default' (tcp).",
             "type": "string"
           },
@@ -439,7 +447,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "readOnly": {
             "description": "readOnly here will force the ReadOnly setting in VolumeMounts. Defaults to false.",
@@ -467,7 +476,7 @@
         "type": "object"
       },
       "io.k8s.api.core.v1.LocalVolumeSource": {
-        "description": "Local represents directly-attached storage with node affinity (Beta feature)",
+        "description": "Local represents directly-attached storage with node affinity",
         "properties": {
           "fsType": {
             "description": "fsType is the filesystem type to mount. It applies only when the Path is a block device. Must be a filesystem type supported by the host operating system. Ex. \"ext4\", \"xfs\", \"ntfs\". The default value is to auto-select a filesystem if unspecified.",
@@ -521,7 +530,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -549,7 +559,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -571,7 +582,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "matchFields": {
             "description": "A list of node selector requirements by node's fields.",
@@ -583,7 +595,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "type": "object",
@@ -633,7 +646,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "awsElasticBlockStore": {
             "allOf": [
@@ -641,7 +655,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.AWSElasticBlockStoreVolumeSource"
               }
             ],
-            "description": "awsElasticBlockStore represents an AWS Disk resource that is attached to a kubelet's host machine and then exposed to the pod. More info: https://kubernetes.io/docs/concepts/storage/volumes#awselasticblockstore"
+            "description": "awsElasticBlockStore represents an AWS Disk resource that is attached to a kubelet's host machine and then exposed to the pod. Deprecated: AWSElasticBlockStore is deprecated. All operations for the in-tree awsElasticBlockStore type are redirected to the ebs.csi.aws.com CSI driver. More info: https://kubernetes.io/docs/concepts/storage/volumes#awselasticblockstore"
           },
           "azureDisk": {
             "allOf": [
@@ -649,7 +663,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.AzureDiskVolumeSource"
               }
             ],
-            "description": "azureDisk represents an Azure Data Disk mount on the host and bind mount to the pod."
+            "description": "azureDisk represents an Azure Data Disk mount on the host and bind mount to the pod. Deprecated: AzureDisk is deprecated. All operations for the in-tree azureDisk type are redirected to the disk.csi.azure.com CSI driver."
           },
           "azureFile": {
             "allOf": [
@@ -657,16 +671,11 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.AzureFilePersistentVolumeSource"
               }
             ],
-            "description": "azureFile represents an Azure File Service mount on the host and bind mount to the pod."
+            "description": "azureFile represents an Azure File Service mount on the host and bind mount to the pod. Deprecated: AzureFile is deprecated. All operations for the in-tree azureFile type are redirected to the file.csi.azure.com CSI driver."
           },
           "capacity": {
             "additionalProperties": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.api.resource.Quantity"
-                }
-              ],
-              "default": {}
+              "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.api.resource.Quantity"
             },
             "description": "capacity is the description of the persistent volume's resources and capacity. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#capacity",
             "type": "object"
@@ -677,7 +686,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.CephFSPersistentVolumeSource"
               }
             ],
-            "description": "cephFS represents a Ceph FS mount on the host that shares a pod's lifetime"
+            "description": "cephFS represents a Ceph FS mount on the host that shares a pod's lifetime. Deprecated: CephFS is deprecated and the in-tree cephfs type is no longer supported."
           },
           "cinder": {
             "allOf": [
@@ -685,7 +694,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.CinderPersistentVolumeSource"
               }
             ],
-            "description": "cinder represents a cinder volume attached and mounted on kubelets host machine. More info: https://examples.k8s.io/mysql-cinder-pd/README.md"
+            "description": "cinder represents a cinder volume attached and mounted on kubelets host machine. Deprecated: Cinder is deprecated. All operations for the in-tree cinder type are redirected to the cinder.csi.openstack.org CSI driver. More info: https://examples.k8s.io/mysql-cinder-pd/README.md"
           },
           "claimRef": {
             "allOf": [
@@ -702,7 +711,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.CSIPersistentVolumeSource"
               }
             ],
-            "description": "csi represents storage that is handled by an external CSI driver (Beta feature)."
+            "description": "csi represents storage that is handled by an external CSI driver."
           },
           "fc": {
             "allOf": [
@@ -718,7 +727,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.FlexPersistentVolumeSource"
               }
             ],
-            "description": "flexVolume represents a generic volume resource that is provisioned/attached using an exec based plugin."
+            "description": "flexVolume represents a generic volume resource that is provisioned/attached using an exec based plugin. Deprecated: FlexVolume is deprecated. Consider using a CSIDriver instead."
           },
           "flocker": {
             "allOf": [
@@ -726,7 +735,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.FlockerVolumeSource"
               }
             ],
-            "description": "flocker represents a Flocker volume attached to a kubelet's host machine and exposed to the pod for its usage. This depends on the Flocker control service being running"
+            "description": "flocker represents a Flocker volume attached to a kubelet's host machine and exposed to the pod for its usage. This depends on the Flocker control service being running. Deprecated: Flocker is deprecated and the in-tree flocker type is no longer supported."
           },
           "gcePersistentDisk": {
             "allOf": [
@@ -734,7 +743,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.GCEPersistentDiskVolumeSource"
               }
             ],
-            "description": "gcePersistentDisk represents a GCE Disk resource that is attached to a kubelet's host machine and then exposed to the pod. Provisioned by an admin. More info: https://kubernetes.io/docs/concepts/storage/volumes#gcepersistentdisk"
+            "description": "gcePersistentDisk represents a GCE Disk resource that is attached to a kubelet's host machine and then exposed to the pod. Provisioned by an admin. Deprecated: GCEPersistentDisk is deprecated. All operations for the in-tree gcePersistentDisk type are redirected to the pd.csi.storage.gke.io CSI driver. More info: https://kubernetes.io/docs/concepts/storage/volumes#gcepersistentdisk"
           },
           "glusterfs": {
             "allOf": [
@@ -742,7 +751,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.GlusterfsPersistentVolumeSource"
               }
             ],
-            "description": "glusterfs represents a Glusterfs volume that is attached to a host and exposed to the pod. Provisioned by an admin. More info: https://examples.k8s.io/volumes/glusterfs/README.md"
+            "description": "glusterfs represents a Glusterfs volume that is attached to a host and exposed to the pod. Provisioned by an admin. Deprecated: Glusterfs is deprecated and the in-tree glusterfs type is no longer supported. More info: https://examples.k8s.io/volumes/glusterfs/README.md"
           },
           "hostPath": {
             "allOf": [
@@ -774,7 +783,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "nfs": {
             "allOf": [
@@ -802,7 +812,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.PhotonPersistentDiskVolumeSource"
               }
             ],
-            "description": "photonPersistentDisk represents a PhotonController persistent disk attached and mounted on kubelets host machine"
+            "description": "photonPersistentDisk represents a PhotonController persistent disk attached and mounted on kubelets host machine. Deprecated: PhotonPersistentDisk is deprecated and the in-tree photonPersistentDisk type is no longer supported."
           },
           "portworxVolume": {
             "allOf": [
@@ -810,7 +820,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.PortworxVolumeSource"
               }
             ],
-            "description": "portworxVolume represents a portworx volume attached and mounted on kubelets host machine"
+            "description": "portworxVolume represents a portworx volume attached and mounted on kubelets host machine. Deprecated: PortworxVolume is deprecated. All operations for the in-tree portworxVolume type are redirected to the pxd.portworx.com CSI driver when the CSIMigrationPortworx feature-gate is on."
           },
           "quobyte": {
             "allOf": [
@@ -818,7 +828,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.QuobyteVolumeSource"
               }
             ],
-            "description": "quobyte represents a Quobyte mount on the host that shares a pod's lifetime"
+            "description": "quobyte represents a Quobyte mount on the host that shares a pod's lifetime. Deprecated: Quobyte is deprecated and the in-tree quobyte type is no longer supported."
           },
           "rbd": {
             "allOf": [
@@ -826,7 +836,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.RBDPersistentVolumeSource"
               }
             ],
-            "description": "rbd represents a Rados Block Device mount on the host that shares a pod's lifetime. More info: https://examples.k8s.io/volumes/rbd/README.md"
+            "description": "rbd represents a Rados Block Device mount on the host that shares a pod's lifetime. Deprecated: RBD is deprecated and the in-tree rbd type is no longer supported. More info: https://examples.k8s.io/volumes/rbd/README.md"
           },
           "scaleIO": {
             "allOf": [
@@ -834,7 +844,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.ScaleIOPersistentVolumeSource"
               }
             ],
-            "description": "scaleIO represents a ScaleIO persistent volume attached and mounted on Kubernetes nodes."
+            "description": "scaleIO represents a ScaleIO persistent volume attached and mounted on Kubernetes nodes. Deprecated: ScaleIO is deprecated and the in-tree scaleIO type is no longer supported."
           },
           "storageClassName": {
             "description": "storageClassName is the name of StorageClass to which this persistent volume belongs. Empty value means that this volume does not belong to any StorageClass.",
@@ -846,7 +856,11 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.StorageOSPersistentVolumeSource"
               }
             ],
-            "description": "storageOS represents a StorageOS volume that is attached to the kubelet's host machine and mounted into the pod More info: https://examples.k8s.io/volumes/storageos/README.md"
+            "description": "storageOS represents a StorageOS volume that is attached to the kubelet's host machine and mounted into the pod. Deprecated: StorageOS is deprecated and the in-tree storageos type is no longer supported. More info: https://examples.k8s.io/volumes/storageos/README.md"
+          },
+          "volumeAttributesClassName": {
+            "description": "Name of VolumeAttributesClass to which this persistent volume belongs. Empty value is not allowed. When this field is not set, it indicates that this volume does not belong to any VolumeAttributesClass. This field is mutable and can be changed by the CSI driver after a volume has been updated successfully to a new class. For an unbound PersistentVolume, the volumeAttributesClassName will be matched with unbound PersistentVolumeClaims during the binding process. This is a beta field and requires enabling VolumeAttributesClass feature (off by default).",
+            "type": "string"
           },
           "volumeMode": {
             "description": "volumeMode defines if a volume is intended to be used with a formatted filesystem or to remain in raw block state. Value of Filesystem is implied when not included in spec.",
@@ -858,7 +872,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.VsphereVirtualDiskVolumeSource"
               }
             ],
-            "description": "vsphereVolume represents a vSphere volume attached and mounted on kubelets host machine"
+            "description": "vsphereVolume represents a vSphere volume attached and mounted on kubelets host machine. Deprecated: VsphereVolume is deprecated. All operations for the in-tree vsphereVolume type are redirected to the csi.vsphere.vmware.com CSI driver."
           }
         },
         "type": "object"
@@ -952,6 +966,7 @@
             "type": "string"
           },
           "keyring": {
+            "default": "/etc/ceph/keyring",
             "description": "keyring is the path to key ring for RBDUser. Default is /etc/ceph/keyring. More info: https://examples.k8s.io/volumes/rbd/README.md#how-to-use-it",
             "type": "string"
           },
@@ -961,9 +976,11 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "pool": {
+            "default": "rbd",
             "description": "pool is the rados pool name. Default is rbd. More info: https://examples.k8s.io/volumes/rbd/README.md#how-to-use-it",
             "type": "string"
           },
@@ -980,6 +997,7 @@
             "description": "secretRef is name of the authentication secret for RBDUser. If provided overrides keyring. Default is nil. More info: https://examples.k8s.io/volumes/rbd/README.md#how-to-use-it"
           },
           "user": {
+            "default": "admin",
             "description": "user is the rados user name. Default is admin. More info: https://examples.k8s.io/volumes/rbd/README.md#how-to-use-it",
             "type": "string"
           }
@@ -994,6 +1012,7 @@
         "description": "ScaleIOPersistentVolumeSource represents a persistent ScaleIO volume",
         "properties": {
           "fsType": {
+            "default": "xfs",
             "description": "fsType is the filesystem type to mount. Must be a filesystem type supported by the host operating system. Ex. \"ext4\", \"xfs\", \"ntfs\". Default is \"xfs\"",
             "type": "string"
           },
@@ -1023,6 +1042,7 @@
             "type": "boolean"
           },
           "storageMode": {
+            "default": "ThinProvisioned",
             "description": "storageMode indicates whether the storage for a volume should be ThickProvisioned or ThinProvisioned. Default is ThinProvisioned.",
             "type": "string"
           },
@@ -1106,7 +1126,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -1128,7 +1149,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "type": "object",
@@ -1269,11 +1291,11 @@
             "type": "boolean"
           },
           "fsGroupPolicy": {
-            "description": "fsGroupPolicy defines if the underlying volume supports changing ownership and permission of the volume before being mounted. Refer to the specific FSGroupPolicy values for additional details.\n\nThis field is immutable.\n\nDefaults to ReadWriteOnceWithFSType, which will examine each volume to determine if Kubernetes should modify ownership and permissions of the volume. With the default policy the defined fsGroup will only be applied if a fstype is defined and the volume's access mode contains ReadWriteOnce.",
+            "description": "fsGroupPolicy defines if the underlying volume supports changing ownership and permission of the volume before being mounted. Refer to the specific FSGroupPolicy values for additional details.\n\nThis field was immutable in Kubernetes < 1.29 and now is mutable.\n\nDefaults to ReadWriteOnceWithFSType, which will examine each volume to determine if Kubernetes should modify ownership and permissions of the volume. With the default policy the defined fsGroup will only be applied if a fstype is defined and the volume's access mode contains ReadWriteOnce.",
             "type": "string"
           },
           "podInfoOnMount": {
-            "description": "podInfoOnMount indicates this CSI volume driver requires additional pod information (like podName, podUID, etc.) during mount operations, if set to true. If set to false, pod information will not be passed on mount. Default is false.\n\nThe CSI driver specifies podInfoOnMount as part of driver deployment. If true, Kubelet will pass pod information as VolumeContext in the CSI NodePublishVolume() calls. The CSI driver is responsible for parsing and validating the information passed in as VolumeContext.\n\nThe following VolumeConext will be passed if podInfoOnMount is set to true. This list might grow, but the prefix will be used. \"csi.storage.k8s.io/pod.name\": pod.Name \"csi.storage.k8s.io/pod.namespace\": pod.Namespace \"csi.storage.k8s.io/pod.uid\": string(pod.UID) \"csi.storage.k8s.io/ephemeral\": \"true\" if the volume is an ephemeral inline volume\n                                defined by a CSIVolumeSource, otherwise \"false\"\n\n\"csi.storage.k8s.io/ephemeral\" is a new feature in Kubernetes 1.16. It is only required for drivers which support both the \"Persistent\" and \"Ephemeral\" VolumeLifecycleMode. Other drivers can leave pod info disabled and/or ignore this field. As Kubernetes 1.15 doesn't support this field, drivers can only support one mode when deployed on such a cluster and the deployment determines which mode that is, for example via a command line parameter of the driver.\n\nThis field is immutable.",
+            "description": "podInfoOnMount indicates this CSI volume driver requires additional pod information (like podName, podUID, etc.) during mount operations, if set to true. If set to false, pod information will not be passed on mount. Default is false.\n\nThe CSI driver specifies podInfoOnMount as part of driver deployment. If true, Kubelet will pass pod information as VolumeContext in the CSI NodePublishVolume() calls. The CSI driver is responsible for parsing and validating the information passed in as VolumeContext.\n\nThe following VolumeContext will be passed if podInfoOnMount is set to true. This list might grow, but the prefix will be used. \"csi.storage.k8s.io/pod.name\": pod.Name \"csi.storage.k8s.io/pod.namespace\": pod.Namespace \"csi.storage.k8s.io/pod.uid\": string(pod.UID) \"csi.storage.k8s.io/ephemeral\": \"true\" if the volume is an ephemeral inline volume\n                                defined by a CSIVolumeSource, otherwise \"false\"\n\n\"csi.storage.k8s.io/ephemeral\" is a new feature in Kubernetes 1.16. It is only required for drivers which support both the \"Persistent\" and \"Ephemeral\" VolumeLifecycleMode. Other drivers can leave pod info disabled and/or ignore this field. As Kubernetes 1.15 doesn't support this field, drivers can only support one mode when deployed on such a cluster and the deployment determines which mode that is, for example via a command line parameter of the driver.\n\nThis field was immutable in Kubernetes < 1.29 and now is mutable.",
             "type": "boolean"
           },
           "requiresRepublish": {
@@ -1382,7 +1404,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -1450,6 +1473,10 @@
               "default": {}
             },
             "type": "array",
+            "x-kubernetes-list-map-keys": [
+              "name"
+            ],
+            "x-kubernetes-list-type": "map",
             "x-kubernetes-patch-merge-key": "name",
             "x-kubernetes-patch-strategy": "merge"
           }
@@ -1538,11 +1565,7 @@
               ],
               "default": {}
             },
-            "type": "array",
-            "x-kubernetes-list-map-keys": [
-              "name"
-            ],
-            "x-kubernetes-list-type": "map"
+            "type": "array"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -1613,7 +1636,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "parameters": {
             "additionalProperties": {
@@ -1810,7 +1834,7 @@
         ]
       },
       "io.k8s.api.storage.v1.VolumeAttachmentSource": {
-        "description": "VolumeAttachmentSource represents a volume that should be attached. Right now only PersistenVolumes can be attached via external attacher, in future we may allow also inline volumes in pods. Exactly one member can be set.",
+        "description": "VolumeAttachmentSource represents a volume that should be attached. Right now only PersistentVolumes can be attached via external attacher, in the future we may allow also inline volumes in pods. Exactly one member can be set.",
         "properties": {
           "inlineVolumeSpec": {
             "allOf": [
@@ -1908,7 +1932,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
               }
             ],
-            "default": {},
             "description": "time represents the time the error was encountered."
           }
         },
@@ -1945,7 +1968,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "group": {
             "description": "group is the preferred group of the resource.  Empty implies the group of the containing resource list. For subresources, this may have a different value, for example: Scale\".",
@@ -1972,7 +1996,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "singularName": {
             "default": "",
@@ -2031,7 +2056,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -2060,12 +2086,17 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "gracePeriodSeconds": {
             "description": "The duration in seconds before the object should be deleted. Value must be non-negative integer. The value zero indicates delete immediately. If this value is nil, the default grace period for the specified type will be used. Defaults to a per object value if not specified. zero means delete immediately.",
             "format": "int64",
             "type": "integer"
+          },
+          "ignoreStoreReadErrorWithClusterBreakingPotential": {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "type": "boolean"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -2233,6 +2264,11 @@
           {
             "group": "coordination.k8s.io",
             "kind": "DeleteOptions",
+            "version": "v1alpha2"
+          },
+          {
+            "group": "coordination.k8s.io",
+            "kind": "DeleteOptions",
             "version": "v1beta1"
           },
           {
@@ -2263,7 +2299,7 @@
           {
             "group": "flowcontrol.apiserver.k8s.io",
             "kind": "DeleteOptions",
-            "version": "v1alpha1"
+            "version": "v1"
           },
           {
             "group": "flowcontrol.apiserver.k8s.io",
@@ -2348,7 +2384,12 @@
           {
             "group": "resource.k8s.io",
             "kind": "DeleteOptions",
-            "version": "v1alpha2"
+            "version": "v1alpha3"
+          },
+          {
+            "group": "resource.k8s.io",
+            "kind": "DeleteOptions",
+            "version": "v1beta1"
           },
           {
             "group": "scheduling.k8s.io",
@@ -2379,6 +2420,11 @@
             "group": "storage.k8s.io",
             "kind": "DeleteOptions",
             "version": "v1beta1"
+          },
+          {
+            "group": "storagemigration.k8s.io",
+            "kind": "DeleteOptions",
+            "version": "v1alpha1"
           }
         ]
       },
@@ -2399,7 +2445,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "matchLabels": {
             "additionalProperties": {
@@ -2432,7 +2479,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -2523,7 +2571,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
               }
             ],
-            "default": {},
             "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata"
           },
           "deletionGracePeriodSeconds": {
@@ -2546,6 +2593,7 @@
               "type": "string"
             },
             "type": "array",
+            "x-kubernetes-list-type": "set",
             "x-kubernetes-patch-strategy": "merge"
           },
           "generateName": {
@@ -2575,7 +2623,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "name": {
             "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
@@ -2596,6 +2645,10 @@
               "default": {}
             },
             "type": "array",
+            "x-kubernetes-list-map-keys": [
+              "uid"
+            ],
+            "x-kubernetes-list-type": "map",
             "x-kubernetes-patch-merge-key": "uid",
             "x-kubernetes-patch-strategy": "merge"
           },
@@ -2691,7 +2744,8 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.StatusDetails"
               }
             ],
-            "description": "Extended data associated with the reason.  Each reason may define its own extended details. This field is optional and the data returned is not guaranteed to conform to any schema except that defined by the reason type."
+            "description": "Extended data associated with the reason.  Each reason may define its own extended details. This field is optional and the data returned is not guaranteed to conform to any schema except that defined by the reason type.",
+            "x-kubernetes-list-type": "atomic"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -2725,11 +2779,6 @@
             "group": "",
             "kind": "Status",
             "version": "v1"
-          },
-          {
-            "group": "resource.k8s.io",
-            "kind": "Status",
-            "version": "v1alpha2"
           }
         ]
       },
@@ -2764,7 +2813,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "group": {
             "description": "The group attribute of the resource associated with the status StatusReason.",
@@ -2804,7 +2854,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.runtime.RawExtension"
               }
             ],
-            "default": {},
             "description": "Object is:\n * If Type is Added or Modified: the new state of the object.\n * If Type is Deleted: the state of the object immediately before deletion.\n * If Type is Error: *Status is recommended; other types may make sense\n   depending on context."
           },
           "type": {
@@ -2961,6 +3010,11 @@
           {
             "group": "coordination.k8s.io",
             "kind": "WatchEvent",
+            "version": "v1alpha2"
+          },
+          {
+            "group": "coordination.k8s.io",
+            "kind": "WatchEvent",
             "version": "v1beta1"
           },
           {
@@ -2991,7 +3045,7 @@
           {
             "group": "flowcontrol.apiserver.k8s.io",
             "kind": "WatchEvent",
-            "version": "v1alpha1"
+            "version": "v1"
           },
           {
             "group": "flowcontrol.apiserver.k8s.io",
@@ -3076,7 +3130,12 @@
           {
             "group": "resource.k8s.io",
             "kind": "WatchEvent",
-            "version": "v1alpha2"
+            "version": "v1alpha3"
+          },
+          {
+            "group": "resource.k8s.io",
+            "kind": "WatchEvent",
+            "version": "v1beta1"
           },
           {
             "group": "scheduling.k8s.io",
@@ -3107,6 +3166,11 @@
             "group": "storage.k8s.io",
             "kind": "WatchEvent",
             "version": "v1beta1"
+          },
+          {
+            "group": "storagemigration.k8s.io",
+            "kind": "WatchEvent",
+            "version": "v1alpha1"
           }
         ]
       },
@@ -3137,6 +3201,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
@@ -3202,6 +3271,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -3290,6 +3368,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -3420,6 +3503,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriverList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriverList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriverList"
@@ -3464,7 +3557,7 @@
       },
       "parameters": [
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -3512,11 +3605,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3537,6 +3636,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3557,6 +3661,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3614,6 +3723,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -3644,6 +3762,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3664,6 +3787,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3702,6 +3830,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3746,7 +3879,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -3798,6 +3931,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -3818,11 +3956,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3843,6 +3987,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3914,11 +4063,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -3939,6 +4094,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIDriver"
@@ -4010,6 +4170,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -4098,6 +4267,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -4228,6 +4402,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINodeList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINodeList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINodeList"
@@ -4272,7 +4456,7 @@
       },
       "parameters": [
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -4320,11 +4504,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4345,6 +4535,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4365,6 +4560,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4422,6 +4622,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -4452,6 +4661,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4472,6 +4686,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4510,6 +4729,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4554,7 +4778,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -4606,6 +4830,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -4626,11 +4855,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4651,6 +4886,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4722,11 +4962,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4747,6 +4993,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSINode"
@@ -4787,6 +5038,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
@@ -4876,7 +5137,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -4973,6 +5234,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "A selector to restrict the list of returned objects by their labels. Defaults to everything.",
             "in": "query",
             "name": "labelSelector",
@@ -5057,6 +5327,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -5187,6 +5462,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacityList"
@@ -5241,7 +5526,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -5289,11 +5574,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5314,6 +5605,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5334,6 +5630,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5391,6 +5692,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -5421,6 +5731,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -5441,6 +5756,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -5479,6 +5799,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5533,7 +5858,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -5585,6 +5910,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -5605,11 +5935,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5630,6 +5966,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5701,11 +6042,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5726,6 +6073,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.CSIStorageCapacity"
@@ -5797,6 +6149,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -5885,6 +6246,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -6015,6 +6381,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClassList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClassList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClassList"
@@ -6059,7 +6435,7 @@
       },
       "parameters": [
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -6107,11 +6483,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6132,6 +6514,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6152,6 +6539,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6209,6 +6601,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -6239,6 +6640,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6259,6 +6665,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6297,6 +6708,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6341,7 +6757,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -6393,6 +6809,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -6413,11 +6834,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6438,6 +6865,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6509,11 +6941,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6534,6 +6972,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.StorageClass"
@@ -6605,6 +7048,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -6693,6 +7145,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -6823,6 +7280,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachmentList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachmentList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachmentList"
@@ -6867,7 +7334,7 @@
       },
       "parameters": [
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -6915,11 +7382,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -6940,6 +7413,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -6960,6 +7438,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7017,6 +7500,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -7047,6 +7539,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7067,6 +7564,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7105,6 +7607,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7149,7 +7656,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -7201,6 +7708,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -7221,11 +7733,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7246,6 +7764,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7317,11 +7840,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7342,6 +7871,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7382,6 +7916,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7426,7 +7965,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -7478,6 +8017,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -7498,11 +8042,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7523,6 +8073,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7594,11 +8149,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7619,6 +8180,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.storage.v1.VolumeAttachment"
@@ -7659,6 +8225,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7748,7 +8324,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -7810,6 +8386,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7909,7 +8495,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -7971,6 +8557,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8060,7 +8656,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8122,6 +8718,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8221,7 +8827,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8283,6 +8889,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8372,7 +8988,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8434,6 +9050,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8533,7 +9159,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8595,6 +9221,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8704,7 +9340,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8766,6 +9402,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -8855,7 +9501,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -8917,6 +9563,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -9016,7 +9672,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -9078,6 +9734,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -9167,7 +9833,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -9229,6 +9895,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -9328,7 +10004,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {

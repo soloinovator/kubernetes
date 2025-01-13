@@ -251,6 +251,16 @@ func TestNewMap(t *testing.T) {
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			m, err := NewMap(ctx, tc.cfgs, fakeRegistry, nilRecorderFactory)
+			defer func() {
+				if m != nil {
+					// to close all frameworks registered in this map.
+					err := m.Close()
+					if err != nil {
+						t.Errorf("error closing map: %v", err)
+					}
+				}
+			}()
+
 			if err := checkErr(err, tc.wantErr); err != nil {
 				t.Fatal(err)
 			}
@@ -280,8 +290,8 @@ func (p *fakePlugin) Bind(context.Context, *framework.CycleState, *v1.Pod, strin
 	return nil
 }
 
-func newFakePlugin(name string) func(object runtime.Object, handle framework.Handle) (framework.Plugin, error) {
-	return func(_ runtime.Object, _ framework.Handle) (framework.Plugin, error) {
+func newFakePlugin(name string) func(ctx context.Context, object runtime.Object, handle framework.Handle) (framework.Plugin, error) {
+	return func(_ context.Context, _ runtime.Object, _ framework.Handle) (framework.Plugin, error) {
 		return &fakePlugin{name: name}, nil
 	}
 }

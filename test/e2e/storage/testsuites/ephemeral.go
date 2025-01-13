@@ -117,7 +117,7 @@ func (p *ephemeralTestSuite) DefineTests(driver storageframework.TestDriver, pat
 	// Beware that it also registers an AfterEach which renders f unusable. Any code using
 	// f must run inside an It or Context callback.
 	f := framework.NewFrameworkWithCustomTimeouts("ephemeral", storageframework.GetDriverTimeouts(driver))
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
 	init := func(ctx context.Context) {
 		if pattern.VolType == storageframework.CSIInlineVolume {
@@ -274,7 +274,7 @@ func (p *ephemeralTestSuite) DefineTests(driver storageframework.TestDriver, pat
 			framework.ExpectNoError(err, "while waiting for fs resize to finish")
 
 			pvcConditions := pvc.Status.Conditions
-			framework.ExpectEqual(len(pvcConditions), 0, "pvc should not have conditions")
+			gomega.Expect(pvcConditions).To(gomega.BeEmpty(), "pvc should not have conditions")
 			return nil
 		}
 		l.testCase.TestEphemeral(ctx)
@@ -295,7 +295,7 @@ func (p *ephemeralTestSuite) DefineTests(driver storageframework.TestDriver, pat
 
 		l.testCase.RunningPodCheck = func(ctx context.Context, pod *v1.Pod) interface{} {
 			// Create another pod with the same inline volume attributes.
-			pod2 := StartInPodWithInlineVolume(ctx, f.ClientSet, f.Namespace.Name, "inline-volume-tester2", "sleep 100000",
+			pod2 := StartInPodWithInlineVolume(ctx, f.ClientSet, f.Namespace.Name, "inline-volume-tester2", e2epod.InfiniteSleepCommand,
 				[]v1.VolumeSource{pod.Spec.Volumes[0].VolumeSource},
 				readOnly,
 				l.testCase.Node)
@@ -387,7 +387,6 @@ func (t EphemeralTest) TestEphemeral(ctx context.Context) {
 	gomega.Expect(client).NotTo(gomega.BeNil(), "EphemeralTest.Client is required")
 
 	ginkgo.By(fmt.Sprintf("checking the requested inline volume exists in the pod running on node %+v", t.Node))
-	command := "sleep 10000"
 
 	var volumes []v1.VolumeSource
 	numVolumes := t.NumInlineVolumes
@@ -415,7 +414,7 @@ func (t EphemeralTest) TestEphemeral(ctx context.Context) {
 		}
 		volumes = append(volumes, volume)
 	}
-	pod := StartInPodWithInlineVolume(ctx, client, t.Namespace, "inline-volume-tester", command, volumes, t.ReadOnly, t.Node)
+	pod := StartInPodWithInlineVolume(ctx, client, t.Namespace, "inline-volume-tester", e2epod.InfiniteSleepCommand, volumes, t.ReadOnly, t.Node)
 	defer func() {
 		// pod might be nil now.
 		StopPodAndDependents(ctx, client, t.Timeouts, pod)
@@ -523,7 +522,7 @@ func GenericEphemeralVolumesEnabled(ctx context.Context, c clientset.Interface, 
 				Spec: v1.PersistentVolumeClaimSpec{
 					StorageClassName: &storageClassName,
 					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-					Resources: v1.ResourceRequirements{
+					Resources: v1.VolumeResourceRequirements{
 						Requests: v1.ResourceList{
 							v1.ResourceStorage: resource.MustParse("1Gi"),
 						},

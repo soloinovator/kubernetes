@@ -24,15 +24,14 @@ set -o nounset
 set -o pipefail
 
 ### Hardcoded constants
-DEFAULT_CNI_VERSION='v1.2.0'
-DEFAULT_CNI_HASH='29ea9be8e81e0b4c44469c4307cd8be83647e30ade8b737d94df81477b494662308b2566fce80cfa993c761afb6e5bad9382455260b857c7f941fa18bb7919b4'
-DEFAULT_NPD_VERSION='v0.8.9'
-DEFAULT_NPD_HASH_AMD64='4919c47447c5f3871c1dc3171bbb817a38c8c8d07a6ce55a77d43cadc098e9ad608ceeab121eec00c13c0b6a2cc3488544d61ce84cdade1823f3fd5163a952de'
-# TODO (SergeyKanzhelev): fill up for npd 0.8.9+
-DEFAULT_NPD_HASH_ARM64='8ccb42a862efdfc1f25ca9a22f3fd36f9fdff1ac618dd7d39e3b5991505dd610d432364420896ad71f42197a116f28a85dde58b129baa075ebb7312caa57f852'
-DEFAULT_CRICTL_VERSION='v1.27.0'
-DEFAULT_CRICTL_AMD64_SHA512='aa622325bf05520939f9e020d7a28ab48ac23e2fae6f47d5a4e52174c88c1ebc31b464853e4fd65bd8f5331f330a6ca96fd370d247d3eeaed042da4ee2d1219a'
-DEFAULT_CRICTL_ARM64_SHA512='db062e43351a63347871e7094115be2ae3853afcd346d47f7b51141da8c3202c2df58d2e17359322f632abcb37474fd7fdb3b7aadbc5cfd5cf6d3bad040b6251'
+DEFAULT_CNI_VERSION='v1.6.0'
+DEFAULT_CNI_HASH='3d9f34a43e0550d9f4f28c724e25bc5cfcfc601c329586bafe4910c3c72f918055151066e71e14e157276138e358344a1d815d957646df43a86d3673ab2849c3'
+DEFAULT_NPD_VERSION='v0.8.20'
+DEFAULT_NPD_HASH_AMD64='09029b62f8023885f3a856c20b5fafecabb880806467848ae25f578c4ee6afacd97c85a0c2d0c582c8d79d3716c83d0e7d324073c5816ae5a812812a6f21450b'
+DEFAULT_NPD_HASH_ARM64='233f7e4451de920b7ce8b0ac0e46da1a07ef559e628a75746ce7927492a1886ebd007875f76462d2d0bf3b1dc807a7e8321108cafbd7db9eee39c0e2cfb6c051'
+DEFAULT_CRICTL_VERSION='v1.32.0'
+DEFAULT_CRICTL_AMD64_SHA512='f0edcc1e6c42315e51789255bdff4f6c2a151ad6f92c7de813b0df3a34ea44211c5c2c369b6629090885f834172819a8c113927c695df8818ccc440abdcb517f'
+DEFAULT_CRICTL_ARM64_SHA512='ef0696b59ccae9c535470111c6385d5721047897c14f9b56ddc1893e170d4053afd254b527f05be248100b0980033035a8fba589402fe47966163021cf0e82e3'
 DEFAULT_MOUNTER_TAR_SHA='7956fd42523de6b3107ddc3ce0e75233d2fcb78436ff07a1389b6eaac91fb2b1b72a08f7a219eaf96ba1ca4da8d45271002e0d60e0644e796c665f99bb356516'
 AUTH_PROVIDER_GCP_HASH_LINUX_AMD64="${AUTH_PROVIDER_GCP_HASH_LINUX_AMD64:-156058e5b3994cba91c23831774033e0d505d6d8b80f43541ef6af91b320fd9dfaabe42ec8a8887b51d87104c2b57e1eb895649d681575ffc80dd9aee8e563db}"
 AUTH_PROVIDER_GCP_HASH_LINUX_ARM64="${AUTH_PROVIDER_GCP_HASH_LINUX_ARM64:-1aa3b0bea10a9755231989ffc150cbfa770f1d96932db7535473f7bfeb1108bafdae80202ae738d59495982512e716ff7366d5f414d0e76dd50519f98611f9ab}"
@@ -254,7 +253,7 @@ function install-gci-mounter-tools {
   mkdir -p "${CONTAINERIZED_MOUNTER_HOME}"
   chmod a+x "${CONTAINERIZED_MOUNTER_HOME}"
   mkdir -p "${CONTAINERIZED_MOUNTER_HOME}/rootfs"
-  download-or-bust "${mounter_tar_sha}" "https://dl.k8s.io/gci-mounter/mounter.tar"
+  download-or-bust "${mounter_tar_sha}" "https://storage.googleapis.com/kubernetes-release/gci-mounter/mounter.tar"
   cp "${KUBE_HOME}/kubernetes/server/bin/mounter" "${CONTAINERIZED_MOUNTER_HOME}/mounter"
   chmod a+x "${CONTAINERIZED_MOUNTER_HOME}/mounter"
   mv "${KUBE_HOME}/mounter.tar" /tmp/mounter.tar
@@ -296,9 +295,14 @@ function install-node-problem-detector {
     return
   fi
 
-  echo "Downloading ${npd_tar}."
-  local -r npd_release_path="${NODE_PROBLEM_DETECTOR_RELEASE_PATH:-https://dl.k8s.io}"
-  download-or-bust "${npd_hash}" "${npd_release_path}/node-problem-detector/${npd_tar}"
+  if [[ -n "${NODE_PROBLEM_DETECTOR_RELEASE_PATH:-}" ]]; then
+    echo "Downloading ${npd_tar} from ${NODE_PROBLEM_DETECTOR_RELEASE_PATH}."
+    local -r download_path="${NODE_PROBLEM_DETECTOR_RELEASE_PATH}/node-problem-detector/${npd_tar}"
+  else
+    echo "Downloading ${npd_tar} from github."
+    local -r download_path="https://github.com/kubernetes/node-problem-detector/releases/download/${npd_version}/${npd_tar}"
+  fi
+  download-or-bust "${npd_hash}" "${download_path}"
   local -r npd_dir="${KUBE_HOME}/node-problem-detector"
   mkdir -p "${npd_dir}"
   tar xzf "${KUBE_HOME}/${npd_tar}" -C "${npd_dir}" --overwrite
@@ -414,8 +418,6 @@ function install-kube-manifests {
     cp "${dst_dir}/kubernetes/gci-trusty/gke-internal-configure-helper.sh" "${KUBE_BIN}/"
   fi
 
-  cp "${dst_dir}/kubernetes/gci-trusty/health-monitor.sh" "${KUBE_BIN}/health-monitor.sh"
-
   rm -f "${KUBE_HOME}/${manifests_tar}"
   rm -f "${KUBE_HOME}/${manifests_tar}.sha512"
 }
@@ -518,11 +520,6 @@ function install-containerd-ubuntu {
   # Override to latest versions of containerd and runc
   systemctl stop containerd
   if [[ -n "${UBUNTU_INSTALL_CONTAINERD_VERSION:-}" ]]; then
-    # TODO(https://github.com/containerd/containerd/issues/2901): Remove this check once containerd has arm64 release.
-    if [[ $(dpkg --print-architecture) != "amd64" ]]; then
-      echo "Unable to automatically install containerd in non-amd64 image. Bailing out..."
-      exit 2
-    fi
     # containerd versions have slightly different url(s), so try both
     # shellcheck disable=SC2086
     ( curl ${CURL_FLAGS} \
@@ -534,17 +531,52 @@ function install-containerd-ubuntu {
     | tar --overwrite -xzv -C /usr/
   fi
   if [[ -n "${UBUNTU_INSTALL_RUNC_VERSION:-}" ]]; then
-    # TODO: Remove this check once runc has arm64 release.
-    if [[ $(dpkg --print-architecture) != "amd64" ]]; then
-      echo "Unable to automatically install runc in non-amd64. Bailing out..."
-      exit 2
-    fi
     # shellcheck disable=SC2086
     curl ${CURL_FLAGS} \
       --location \
       "https://github.com/opencontainers/runc/releases/download/${UBUNTU_INSTALL_RUNC_VERSION}/runc.${HOST_ARCH}" --output /usr/sbin/runc \
     && chmod 755 /usr/sbin/runc
   fi
+  sudo systemctl start containerd
+}
+
+# If we are on cos we can try to install containerd
+function install-containerd-cos {
+  # bailout if we are not on COS
+  if [ -e /etc/os-release ] && ! grep -q "ID=cos" /etc/os-release; then
+    echo "Unable to automatically install containerd in non-cos image. Bailing out..."
+    exit 2
+  fi
+
+  # Override to latest versions of containerd and runc
+  systemctl stop containerd
+  mkdir -p /home/containerd/
+  mount --bind /home/containerd /home/containerd
+  mount -o remount,exec /home/containerd
+  if [[ -n "${COS_INSTALL_CONTAINERD_VERSION:-}" ]]; then
+    # containerd versions have slightly different url(s), so try both
+    # shellcheck disable=SC2086
+    ( curl ${CURL_FLAGS} \
+        --location \
+        "https://github.com/containerd/containerd/releases/download/${COS_INSTALL_CONTAINERD_VERSION}/containerd-${COS_INSTALL_CONTAINERD_VERSION:1}-${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" \
+      || curl ${CURL_FLAGS} \
+        --location \
+        "https://github.com/containerd/containerd/releases/download/${COS_INSTALL_CONTAINERD_VERSION}/containerd-${COS_INSTALL_CONTAINERD_VERSION:1}.${HOST_PLATFORM}-${HOST_ARCH}.tar.gz" ) \
+    | tar --overwrite -xzv -C /home/containerd/
+    cp /usr/lib/systemd/system/containerd.service /etc/systemd/system/containerd.service
+    # fix the path of the new containerd binary
+    sed -i 's|ExecStart=.*|ExecStart=/home/containerd/bin/containerd|' /etc/systemd/system/containerd.service
+  fi
+  if [[ -n "${COS_INSTALL_RUNC_VERSION:-}" ]]; then
+    # shellcheck disable=SC2086
+    curl ${CURL_FLAGS} \
+      --location \
+      "https://github.com/opencontainers/runc/releases/download/${COS_INSTALL_RUNC_VERSION}/runc.${HOST_ARCH}" --output /home/containerd/bin/runc \
+    && chmod 755 /home/containerd/bin/runc
+    # ensure runc gets picked up from the correct location
+    sed -i "/\[Service\]/a Environment=PATH=/home/containerd/bin:$PATH" /etc/systemd/system/containerd.service
+  fi
+  systemctl daemon-reload
   sudo systemctl start containerd
 }
 
@@ -568,9 +600,9 @@ function install-auth-provider-gcp {
   download-or-bust "${auth_provider_gcp_hash}" "${auth_provider_storage_full_path}"
 
   mv "${KUBE_HOME}/${filename}" "${AUTH_PROVIDER_GCP_LINUX_BIN_DIR}"
-  chmod a+x "${KUBE_BIN}/${filename}"
+  chmod a+x "${AUTH_PROVIDER_GCP_LINUX_BIN_DIR}/${filename}"
 
-  cat >> "${AUTH_PROVIDER_GCP_LINUX_CONF_FILE}" << EOF
+  cat > "${AUTH_PROVIDER_GCP_LINUX_CONF_FILE}" << EOF
 kind: CredentialProviderConfig
 apiVersion: kubelet.config.k8s.io/v1
 providers:
@@ -593,6 +625,9 @@ function ensure-containerd-runtime {
   if [[ -n "${UBUNTU_INSTALL_CONTAINERD_VERSION:-}" || -n "${UBUNTU_INSTALL_RUNC_VERSION:-}" ]]; then
     log-wrap "InstallContainerdUbuntu" install-containerd-ubuntu
   fi
+  if [[ -n "${COS_INSTALL_CONTAINERD_VERSION:-}" || -n "${COS_INSTALL_RUNC_VERSION:-}" ]]; then
+    log-wrap "InstallContainerdCOS" install-containerd-cos
+  fi
 
   # Fall back to installing distro specific containerd, if not found
   if ! command -v containerd >/dev/null 2>&1; then
@@ -603,6 +638,9 @@ function ensure-containerd-runtime {
     case "${linuxrelease}" in
       Ubuntu)
         log-wrap "InstallContainerdUbuntu" install-containerd-ubuntu
+        ;;
+      cos)
+        log-wrap "InstallContainerdCOS" install-containerd-cos
         ;;
       *)
         echo "Installing containerd for linux release ${linuxrelease} not supported" >&2

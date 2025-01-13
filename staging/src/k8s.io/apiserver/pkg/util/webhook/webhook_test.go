@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -407,14 +406,14 @@ func TestTLSConfig(t *testing.T) {
 			test:       "server cert with SHA1 signature",
 			clientCA:   caCert,
 			serverCert: append(append(sha1ServerCertInter, byte('\n')), caCertInter...), serverKey: serverKey,
-			errRegex:                         "x509: cannot verify signature: insecure algorithm SHA1-RSA \\(temporarily override with GODEBUG=x509sha1=1\\)",
+			errRegex:                         "x509: cannot verify signature: insecure algorithm SHA1-RSA",
 			increaseSHA1SignatureWarnCounter: true,
 		},
 		{
 			test:       "server cert signed by an intermediate CA with SHA1 signature",
 			clientCA:   caCert,
 			serverCert: append(append(serverCertInterSHA1, byte('\n')), caCertInterSHA1...), serverKey: serverKey,
-			errRegex:                         "x509: cannot verify signature: insecure algorithm SHA1-RSA \\(temporarily override with GODEBUG=x509sha1=1\\)",
+			errRegex:                         "x509: cannot verify signature: insecure algorithm SHA1-RSA",
 			increaseSHA1SignatureWarnCounter: true,
 		},
 	}
@@ -688,7 +687,7 @@ func TestWithExponentialBackoff(t *testing.T) {
 }
 
 func bootstrapTestDir(t *testing.T) string {
-	dir, err := ioutil.TempDir("", "")
+	dir, err := os.MkdirTemp("", "")
 
 	if err != nil {
 		t.Fatal(err)
@@ -703,7 +702,7 @@ func bootstrapTestDir(t *testing.T) string {
 
 	// Write the certificate files to disk or fail
 	for fileName, fileData := range files {
-		if err := ioutil.WriteFile(filepath.Join(dir, fileName), fileData, 0400); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, fileName), fileData, 0400); err != nil {
 			os.RemoveAll(dir)
 			t.Fatal(err)
 		}
@@ -713,7 +712,7 @@ func bootstrapTestDir(t *testing.T) string {
 }
 
 func newKubeConfigFile(config v1.Config) (string, error) {
-	configFile, err := ioutil.TempFile("", "")
+	configFile, err := os.CreateTemp("", "")
 	if err != nil {
 		return "", err
 	}

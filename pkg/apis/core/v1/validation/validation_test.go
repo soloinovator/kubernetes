@@ -25,6 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+
+	"k8s.io/kubernetes/pkg/apis/core"
 )
 
 func TestValidateResourceRequirements(t *testing.T) {
@@ -158,7 +160,7 @@ func validateNamesAndValuesInDescription(t *testing.T, r v1.ResourceList, errs f
 func TestValidateContainerResourceName(t *testing.T) {
 	successCase := []struct {
 		name         string
-		ResourceName string
+		ResourceName core.ResourceName
 	}{{
 		name:         "CPU resource",
 		ResourceName: "cpu",
@@ -177,7 +179,7 @@ func TestValidateContainerResourceName(t *testing.T) {
 	}}
 	for _, tc := range successCase {
 		t.Run(tc.name, func(t *testing.T) {
-			if errs := ValidateContainerResourceName(tc.ResourceName, field.NewPath(tc.ResourceName)); len(errs) != 0 {
+			if errs := ValidateContainerResourceName(tc.ResourceName, field.NewPath(string(tc.ResourceName))); len(errs) != 0 {
 				t.Errorf("unexpected error: %v", errs)
 			}
 		})
@@ -185,7 +187,7 @@ func TestValidateContainerResourceName(t *testing.T) {
 
 	errorCase := []struct {
 		name         string
-		ResourceName string
+		ResourceName core.ResourceName
 	}{{
 		name:         "Invalid standard resource",
 		ResourceName: "cpu-core",
@@ -198,7 +200,7 @@ func TestValidateContainerResourceName(t *testing.T) {
 	}}
 	for _, tc := range errorCase {
 		t.Run(tc.name, func(t *testing.T) {
-			if errs := ValidateContainerResourceName(tc.ResourceName, field.NewPath(tc.ResourceName)); len(errs) == 0 {
+			if errs := ValidateContainerResourceName(tc.ResourceName, field.NewPath(string(tc.ResourceName))); len(errs) == 0 {
 				t.Errorf("expected error")
 			}
 		})
@@ -215,6 +217,10 @@ func TestValidatePodLogOptions(t *testing.T) {
 		sinceSecondsGreaterThan1 = int64(10)
 		sinceSecondsLessThan1    = int64(0)
 		timestamp                = metav1.Now()
+		stdoutStream             = v1.LogStreamStdout
+		stderrStream             = v1.LogStreamStderr
+		allStream                = v1.LogStreamAll
+		invalidStream            = "invalid"
 	)
 
 	successCase := []struct {
@@ -250,6 +256,24 @@ func TestValidatePodLogOptions(t *testing.T) {
 			LimitBytes:   &limitBytesGreaterThan1,
 			TailLines:    &positiveLine,
 			SinceSeconds: &sinceSecondsGreaterThan1,
+		},
+	}, {
+		name: "PodLogOptions with stdout Stream",
+		podLogOptions: v1.PodLogOptions{
+			Stream: &stdoutStream,
+		},
+	}, {
+		name: "PodLogOptions with stderr Stream and Follow",
+		podLogOptions: v1.PodLogOptions{
+			Stream: &stderrStream,
+			Follow: true,
+		},
+	}, {
+		name: "PodLogOptions with All Stream, TailLines and LimitBytes",
+		podLogOptions: v1.PodLogOptions{
+			Stream:     &allStream,
+			TailLines:  &positiveLine,
+			LimitBytes: &limitBytesGreaterThan1,
 		},
 	}}
 	for _, tc := range successCase {
@@ -291,6 +315,23 @@ func TestValidatePodLogOptions(t *testing.T) {
 			LimitBytes:   &limitBytesGreaterThan1,
 			SinceSeconds: &sinceSecondsGreaterThan1,
 			SinceTime:    &timestamp,
+		},
+	}, {
+		name: "Invalid podLogOptions with invalid Stream",
+		podLogOptions: v1.PodLogOptions{
+			Stream: &invalidStream,
+		},
+	}, {
+		name: "Invalid podLogOptions with stdout Stream and TailLines set",
+		podLogOptions: v1.PodLogOptions{
+			Stream:    &stdoutStream,
+			TailLines: &positiveLine,
+		},
+	}, {
+		name: "Invalid podLogOptions with stderr Stream and TailLines set",
+		podLogOptions: v1.PodLogOptions{
+			Stream:    &stderrStream,
+			TailLines: &positiveLine,
 		},
 	}}
 	for _, tc := range errorCase {

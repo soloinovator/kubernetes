@@ -214,7 +214,7 @@ func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMet
 			for podName := range missingPods {
 				metrics[podName] = metricsclient.PodMetric{Value: targetUsage}
 			}
-		} else {
+		} else if usageRatio > 1.0 {
 			// on a scale-up, treat missing pods as using 0% of the resource request
 			for podName := range missingPods {
 				metrics[podName] = metricsclient.PodMetric{Value: 0}
@@ -375,10 +375,10 @@ func (c *ReplicaCalculator) GetExternalPerPodMetricReplicas(statusReplicas int32
 	return replicaCount, usage, timestamp, nil
 }
 
-func groupPods(pods []*v1.Pod, metrics metricsclient.PodMetricsInfo, resource v1.ResourceName, cpuInitializationPeriod, delayOfInitialReadinessStatus time.Duration) (readyPodCount int, unreadyPods, missingPods, ignoredPods sets.String) {
-	missingPods = sets.NewString()
-	unreadyPods = sets.NewString()
-	ignoredPods = sets.NewString()
+func groupPods(pods []*v1.Pod, metrics metricsclient.PodMetricsInfo, resource v1.ResourceName, cpuInitializationPeriod, delayOfInitialReadinessStatus time.Duration) (readyPodCount int, unreadyPods, missingPods, ignoredPods sets.Set[string]) {
+	missingPods = sets.New[string]()
+	unreadyPods = sets.New[string]()
+	ignoredPods = sets.New[string]()
 	for _, pod := range pods {
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == v1.PodFailed {
 			ignoredPods.Insert(pod.Name)
@@ -425,7 +425,14 @@ func calculatePodRequests(pods []*v1.Pod, container string, resource v1.Resource
 	requests := make(map[string]int64, len(pods))
 	for _, pod := range pods {
 		podSum := int64(0)
-		for _, c := range pod.Spec.Containers {
+		// Calculate all regular containers and restartable init containers requests.
+		containers := append([]v1.Container{}, pod.Spec.Containers...)
+		for _, c := range pod.Spec.InitContainers {
+			if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
+				containers = append(containers, c)
+			}
+		}
+		for _, c := range containers {
 			if container == "" || container == c.Name {
 				if containerRequest, ok := c.Resources.Requests[resource]; ok {
 					podSum += containerRequest.MilliValue()
@@ -439,7 +446,7 @@ func calculatePodRequests(pods []*v1.Pod, container string, resource v1.Resource
 	return requests, nil
 }
 
-func removeMetricsForPods(metrics metricsclient.PodMetricsInfo, pods sets.String) {
+func removeMetricsForPods(metrics metricsclient.PodMetricsInfo, pods sets.Set[string]) {
 	for _, pod := range pods.UnsortedList() {
 		delete(metrics, pod)
 	}

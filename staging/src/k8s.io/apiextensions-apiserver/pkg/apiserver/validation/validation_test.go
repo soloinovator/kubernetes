@@ -594,14 +594,14 @@ func TestValidateCustomResource(t *testing.T) {
 			},
 			failingObjects: []failingObject{
 				{object: map[string]interface{}{"fieldX": "abc"}, expectErrs: []string{
-					`fieldX: Too long: may not be longer than 2`,
+					`fieldX: Too long: may not be more than 2 bytes`,
 				}},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validator, _, err := NewSchemaValidator(&apiextensions.CustomResourceValidation{OpenAPIV3Schema: &tt.schema})
+			validator, _, err := NewSchemaValidator(&tt.schema)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -620,7 +620,7 @@ func TestValidateCustomResource(t *testing.T) {
 				}
 				errs, _ := celValidator.Validate(context.TODO(), nil, structural, obj, oldObject, celconfig.RuntimeCELCostBudget)
 				if len(errs) > 0 {
-					t.Errorf(errs.ToAggregate().Error())
+					t.Error(errs.ToAggregate().Error())
 				}
 			}
 			for i, failingObject := range tt.failingObjects {
@@ -689,7 +689,7 @@ func TestItemsProperty(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validator, _, err := NewSchemaValidator(&apiextensions.CustomResourceValidation{OpenAPIV3Schema: &tt.args.schema})
+			validator, _, err := NewSchemaValidator(&tt.args.schema)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -276,7 +276,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
               }
             ],
-            "default": {},
             "description": "lastTransitionTime is the last time the condition transitioned from one status to another"
           },
           "message": {
@@ -495,7 +494,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.ContainerResourceMetricSource"
               }
             ],
-            "description": "containerResource refers to a resource metric (such as those specified in requests and limits) known to Kubernetes describing a single container in each pod of the current scale target (e.g. CPU or memory). Such metrics are built in to Kubernetes, and have special scaling options on top of those available to normal per-pod metrics using the \"pods\" source. This is an alpha feature and can be enabled by the HPAContainerMetrics feature flag."
+            "description": "containerResource refers to a resource metric (such as those specified in requests and limits) known to Kubernetes describing a single container in each pod of the current scale target (e.g. CPU or memory). Such metrics are built in to Kubernetes, and have special scaling options on top of those available to normal per-pod metrics using the \"pods\" source."
           },
           "external": {
             "allOf": [
@@ -531,7 +530,7 @@
           },
           "type": {
             "default": "",
-            "description": "type is the type of metric source.  It should be one of \"ContainerResource\", \"External\", \"Object\", \"Pods\" or \"Resource\", each mapping to a matching field in the object. Note: \"ContainerResource\" type is available on when the feature-gate HPAContainerMetrics is enabled",
+            "description": "type is the type of metric source.  It should be one of \"ContainerResource\", \"External\", \"Object\", \"Pods\" or \"Resource\", each mapping to a matching field in the object.",
             "type": "string"
           }
         },
@@ -585,7 +584,7 @@
           },
           "type": {
             "default": "",
-            "description": "type is the type of metric source.  It will be one of \"ContainerResource\", \"External\", \"Object\", \"Pods\" or \"Resource\", each corresponds to a matching field in the object. Note: \"ContainerResource\" type is available on when the feature-gate HPAContainerMetrics is enabled",
+            "description": "type is the type of metric source.  It will be one of \"ContainerResource\", \"External\", \"Object\", \"Pods\" or \"Resource\", each corresponds to a matching field in the object.",
             "type": "string"
           }
         },
@@ -856,7 +855,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "group": {
             "description": "group is the preferred group of the resource.  Empty implies the group of the containing resource list. For subresources, this may have a different value, for example: Scale\".",
@@ -883,7 +883,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "singularName": {
             "default": "",
@@ -942,7 +943,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -971,12 +973,17 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "gracePeriodSeconds": {
             "description": "The duration in seconds before the object should be deleted. Value must be non-negative integer. The value zero indicates delete immediately. If this value is nil, the default grace period for the specified type will be used. Defaults to a per object value if not specified. zero means delete immediately.",
             "format": "int64",
             "type": "integer"
+          },
+          "ignoreStoreReadErrorWithClusterBreakingPotential": {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "type": "boolean"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -1144,6 +1151,11 @@
           {
             "group": "coordination.k8s.io",
             "kind": "DeleteOptions",
+            "version": "v1alpha2"
+          },
+          {
+            "group": "coordination.k8s.io",
+            "kind": "DeleteOptions",
             "version": "v1beta1"
           },
           {
@@ -1174,7 +1186,7 @@
           {
             "group": "flowcontrol.apiserver.k8s.io",
             "kind": "DeleteOptions",
-            "version": "v1alpha1"
+            "version": "v1"
           },
           {
             "group": "flowcontrol.apiserver.k8s.io",
@@ -1259,7 +1271,12 @@
           {
             "group": "resource.k8s.io",
             "kind": "DeleteOptions",
-            "version": "v1alpha2"
+            "version": "v1alpha3"
+          },
+          {
+            "group": "resource.k8s.io",
+            "kind": "DeleteOptions",
+            "version": "v1beta1"
           },
           {
             "group": "scheduling.k8s.io",
@@ -1290,6 +1307,11 @@
             "group": "storage.k8s.io",
             "kind": "DeleteOptions",
             "version": "v1beta1"
+          },
+          {
+            "group": "storagemigration.k8s.io",
+            "kind": "DeleteOptions",
+            "version": "v1alpha1"
           }
         ]
       },
@@ -1310,7 +1332,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "matchLabels": {
             "additionalProperties": {
@@ -1343,7 +1366,8 @@
               "default": "",
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           }
         },
         "required": [
@@ -1434,7 +1458,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
               }
             ],
-            "default": {},
             "description": "CreationTimestamp is a timestamp representing the server time when this object was created. It is not guaranteed to be set in happens-before order across separate operations. Clients may not set this value. It is represented in RFC3339 form and is in UTC.\n\nPopulated by the system. Read-only. Null for lists. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata"
           },
           "deletionGracePeriodSeconds": {
@@ -1457,6 +1480,7 @@
               "type": "string"
             },
             "type": "array",
+            "x-kubernetes-list-type": "set",
             "x-kubernetes-patch-strategy": "merge"
           },
           "generateName": {
@@ -1486,7 +1510,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "name": {
             "description": "Name must be unique within a namespace. Is required when creating resources, although some resources may allow a client to request the generation of an appropriate name automatically. Name is primarily intended for creation idempotence and configuration definition. Cannot be updated. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names",
@@ -1507,6 +1532,10 @@
               "default": {}
             },
             "type": "array",
+            "x-kubernetes-list-map-keys": [
+              "uid"
+            ],
+            "x-kubernetes-list-type": "map",
             "x-kubernetes-patch-merge-key": "uid",
             "x-kubernetes-patch-strategy": "merge"
           },
@@ -1602,7 +1631,8 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.StatusDetails"
               }
             ],
-            "description": "Extended data associated with the reason.  Each reason may define its own extended details. This field is optional and the data returned is not guaranteed to conform to any schema except that defined by the reason type."
+            "description": "Extended data associated with the reason.  Each reason may define its own extended details. This field is optional and the data returned is not guaranteed to conform to any schema except that defined by the reason type.",
+            "x-kubernetes-list-type": "atomic"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -1636,11 +1666,6 @@
             "group": "",
             "kind": "Status",
             "version": "v1"
-          },
-          {
-            "group": "resource.k8s.io",
-            "kind": "Status",
-            "version": "v1alpha2"
           }
         ]
       },
@@ -1675,7 +1700,8 @@
               ],
               "default": {}
             },
-            "type": "array"
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
           },
           "group": {
             "description": "The group attribute of the resource associated with the status StatusReason.",
@@ -1715,7 +1741,6 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.runtime.RawExtension"
               }
             ],
-            "default": {},
             "description": "Object is:\n * If Type is Added or Modified: the new state of the object.\n * If Type is Deleted: the state of the object immediately before deletion.\n * If Type is Error: *Status is recommended; other types may make sense\n   depending on context."
           },
           "type": {
@@ -1872,6 +1897,11 @@
           {
             "group": "coordination.k8s.io",
             "kind": "WatchEvent",
+            "version": "v1alpha2"
+          },
+          {
+            "group": "coordination.k8s.io",
+            "kind": "WatchEvent",
             "version": "v1beta1"
           },
           {
@@ -1902,7 +1932,7 @@
           {
             "group": "flowcontrol.apiserver.k8s.io",
             "kind": "WatchEvent",
-            "version": "v1alpha1"
+            "version": "v1"
           },
           {
             "group": "flowcontrol.apiserver.k8s.io",
@@ -1987,7 +2017,12 @@
           {
             "group": "resource.k8s.io",
             "kind": "WatchEvent",
-            "version": "v1alpha2"
+            "version": "v1alpha3"
+          },
+          {
+            "group": "resource.k8s.io",
+            "kind": "WatchEvent",
+            "version": "v1beta1"
           },
           {
             "group": "scheduling.k8s.io",
@@ -2018,6 +2053,11 @@
             "group": "storage.k8s.io",
             "kind": "WatchEvent",
             "version": "v1beta1"
+          },
+          {
+            "group": "storagemigration.k8s.io",
+            "kind": "WatchEvent",
+            "version": "v1alpha1"
           }
         ]
       },
@@ -2048,6 +2088,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
@@ -2082,6 +2127,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
@@ -2171,7 +2226,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -2268,6 +2323,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "A selector to restrict the list of returned objects by their labels. Defaults to everything.",
             "in": "query",
             "name": "labelSelector",
@@ -2352,6 +2416,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -2482,6 +2551,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscalerList"
@@ -2536,7 +2615,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -2584,11 +2663,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2609,6 +2694,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2629,6 +2719,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2686,6 +2781,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -2716,6 +2820,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -2736,6 +2845,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -2774,6 +2888,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2828,7 +2947,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -2880,6 +2999,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -2900,11 +3024,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2925,6 +3055,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -2996,11 +3131,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3021,6 +3162,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3061,6 +3207,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3115,7 +3266,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -3167,6 +3318,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -3187,11 +3343,17 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3212,6 +3374,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3283,11 +3450,17 @@
                 "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3308,6 +3481,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler"
@@ -3348,6 +3526,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -3437,7 +3625,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -3499,6 +3687,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -3598,7 +3796,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {
@@ -3660,6 +3858,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -3769,7 +3977,7 @@
           }
         },
         {
-          "description": "If 'true', then the output is pretty printed.",
+          "description": "If 'true', then the output is pretty printed. Defaults to 'false' unless the user-agent indicates a browser or command-line HTTP tool (curl and wget).",
           "in": "query",
           "name": "pretty",
           "schema": {

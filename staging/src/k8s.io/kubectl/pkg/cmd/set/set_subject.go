@@ -31,6 +31,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/printers"
 	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/client-go/tools/clientcmd"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/i18n"
@@ -138,7 +139,7 @@ func (o *SubjectOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 
 	var enforceNamespace bool
 	o.namespace, enforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
-	if err != nil {
+	if err != nil && !(o.Local && clientcmd.IsEmptyConfig(err)) {
 		return err
 	}
 
@@ -205,7 +206,7 @@ func (o *SubjectOptions) Validate() error {
 func (o *SubjectOptions) Run(fn updateSubjects) error {
 	patches := CalculatePatches(o.Infos, scheme.DefaultJSONEncoder(), func(obj runtime.Object) ([]byte, error) {
 		subjects := []rbacv1.Subject{}
-		for _, user := range sets.NewString(o.Users...).List() {
+		for _, user := range sets.List(sets.New[string](o.Users...)) {
 			subject := rbacv1.Subject{
 				Kind:     rbacv1.UserKind,
 				APIGroup: rbacv1.GroupName,
@@ -213,7 +214,7 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 			}
 			subjects = append(subjects, subject)
 		}
-		for _, group := range sets.NewString(o.Groups...).List() {
+		for _, group := range sets.List(sets.New[string](o.Groups...)) {
 			subject := rbacv1.Subject{
 				Kind:     rbacv1.GroupKind,
 				APIGroup: rbacv1.GroupName,
@@ -221,7 +222,7 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 			}
 			subjects = append(subjects, subject)
 		}
-		for _, sa := range sets.NewString(o.ServiceAccounts...).List() {
+		for _, sa := range sets.List(sets.New[string](o.ServiceAccounts...)) {
 			tokens := strings.Split(sa, ":")
 			namespace := tokens[0]
 			name := tokens[1]

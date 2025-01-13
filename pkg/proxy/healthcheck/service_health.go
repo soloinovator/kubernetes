@@ -17,9 +17,11 @@ limitations under the License.
 package healthcheck
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -169,9 +171,9 @@ func (hcI *hcInstance) listenAndServeAll(hcs *server) error {
 	for _, ip := range hcs.nodeIPs {
 		addr := net.JoinHostPort(ip.String(), fmt.Sprint(hcI.port))
 		// create http server
-		httpSrv := hcs.httpFactory.New(addr, hcHandler{name: hcI.nsn, hcs: hcs})
+		httpSrv := hcs.httpFactory.New(hcHandler{name: hcI.nsn, hcs: hcs})
 		// start listener
-		listener, err = hcs.listener.Listen(addr)
+		listener, err = hcs.listener.Listen(context.TODO(), addr)
 		if err != nil {
 			// must close whatever have been previously opened
 			// to allow a retry/or port ownership change as needed
@@ -233,6 +235,8 @@ func (h hcHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	resp.Header().Set("Content-Type", "application/json")
 	resp.Header().Set("X-Content-Type-Options", "nosniff")
+	resp.Header().Set("X-Load-Balancing-Endpoint-Weight", strconv.Itoa(count))
+
 	if count != 0 && kubeProxyHealthy {
 		resp.WriteHeader(http.StatusOK)
 	} else {
