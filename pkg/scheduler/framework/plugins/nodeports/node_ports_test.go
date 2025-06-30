@@ -17,7 +17,6 @@ limitations under the License.
 package nodeports
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,6 +142,34 @@ func TestNodePorts(t *testing.T) {
 			name:             "UDP hostPort conflict due to 0.0.0.0 hostIP",
 			wantFilterStatus: framework.NewStatus(framework.Unschedulable, ErrReason),
 		},
+		{
+			pod: st.MakePod().
+				InitContainerPort(false /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					},
+				}).Obj(),
+			nodeInfo: framework.NewNodeInfo(
+				newPod("m1", "TCP/0.0.0.0/8001")),
+			name:                "non-sidecar initContainer using hostPort",
+			wantPreFilterStatus: framework.NewStatus(framework.Skip),
+		},
+		{
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					},
+				}).Obj(),
+			nodeInfo: framework.NewNodeInfo(
+				newPod("m1", "TCP/0.0.0.0/8001")),
+			name:             "TCP hostPort conflict from sidecar initContainer",
+			wantFilterStatus: framework.NewStatus(framework.Unschedulable, ErrReason),
+		},
 	}
 
 	for _, test := range tests {
@@ -189,154 +216,40 @@ func TestPreFilterDisabled(t *testing.T) {
 	}
 }
 
-func TestGetContainerPorts(t *testing.T) {
-	tests := []struct {
-		pod1     *v1.Pod
-		pod2     *v1.Pod
-		expected []*v1.ContainerPort
-	}{
-		{
-			pod1: st.MakePod().ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8001,
-					HostPort:      8001,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8002,
-					HostPort:      8002,
-					Protocol:      v1.ProtocolTCP,
-				}}).ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8003,
-					HostPort:      8003,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8004,
-					HostPort:      8004,
-					Protocol:      v1.ProtocolTCP,
-				}}).ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8005,
-					Protocol:      v1.ProtocolTCP,
-				},
-			}).Obj(),
-			pod2: st.MakePod().ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8011,
-					HostPort:      8011,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8012,
-					HostPort:      8012,
-					Protocol:      v1.ProtocolTCP,
-				}}).ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8013,
-					HostPort:      8013,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8014,
-					HostPort:      8014,
-					Protocol:      v1.ProtocolTCP,
-				}}).ContainerPort([]v1.ContainerPort{
-				{
-					ContainerPort: 8015,
-					Protocol:      v1.ProtocolTCP,
-				},
-			}).Obj(),
-			expected: []*v1.ContainerPort{
-				{
-					ContainerPort: 8001,
-					HostPort:      8001,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8002,
-					HostPort:      8002,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8003,
-					HostPort:      8003,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8004,
-					HostPort:      8004,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8011,
-					HostPort:      8011,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8012,
-					HostPort:      8012,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8013,
-					HostPort:      8013,
-					Protocol:      v1.ProtocolTCP,
-				},
-				{
-					ContainerPort: 8014,
-					HostPort:      8014,
-					Protocol:      v1.ProtocolTCP,
-				},
-			},
-		},
-	}
-
-	for i, test := range tests {
-		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
-			result := getContainerPorts(test.pod1, test.pod2)
-			if diff := cmp.Diff(test.expected, result); diff != "" {
-				t.Errorf("container ports: container ports does not match (-want,+got): %s", diff)
-			}
-		})
-	}
-}
-
 func Test_isSchedulableAfterPodDeleted(t *testing.T) {
 	podWithHostPort := st.MakePod().HostPort(8080)
 
 	testcases := map[string]struct {
 		pod          *v1.Pod
 		oldObj       interface{}
-		expectedHint framework.QueueingHint
+		expectedHint fwk.QueueingHint
 		expectedErr  bool
 	}{
 		"backoff-wrong-old-object": {
 			pod:          podWithHostPort.Obj(),
 			oldObj:       "not-a-pod",
-			expectedHint: framework.Queue,
+			expectedHint: fwk.Queue,
 			expectedErr:  true,
 		},
 		"skip-queue-on-unscheduled": {
 			pod:          podWithHostPort.Obj(),
 			oldObj:       st.MakePod().Obj(),
-			expectedHint: framework.QueueSkip,
+			expectedHint: fwk.QueueSkip,
 		},
 		"skip-queue-on-non-hostport": {
 			pod:          podWithHostPort.Obj(),
 			oldObj:       st.MakePod().Node("fake-node").Obj(),
-			expectedHint: framework.QueueSkip,
+			expectedHint: fwk.QueueSkip,
 		},
 		"skip-queue-on-unrelated-hostport": {
 			pod:          podWithHostPort.Obj(),
 			oldObj:       st.MakePod().Node("fake-node").HostPort(8081).Obj(),
-			expectedHint: framework.QueueSkip,
+			expectedHint: fwk.QueueSkip,
 		},
 		"queue-on-released-hostport": {
 			pod:          podWithHostPort.Obj(),
 			oldObj:       st.MakePod().Node("fake-node").HostPort(8080).Obj(),
-			expectedHint: framework.Queue,
+			expectedHint: fwk.Queue,
 		},
 	}
 

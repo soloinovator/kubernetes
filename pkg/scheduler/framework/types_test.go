@@ -31,6 +31,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/klog/v2"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/features"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
@@ -2095,63 +2096,63 @@ func TestCalculatePodResourcesWithResize(t *testing.T) {
 func TestCloudEvent_Match(t *testing.T) {
 	testCases := []struct {
 		name        string
-		event       ClusterEvent
-		comingEvent ClusterEvent
+		event       fwk.ClusterEvent
+		comingEvent fwk.ClusterEvent
 		wantResult  bool
 	}{
 		{
 			name:        "wildcard event matches with all kinds of coming events",
-			event:       ClusterEvent{Resource: WildCard, ActionType: All},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.All},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  true,
 		},
 		{
 			name:        "event with resource = 'Pod' matching with coming events carries same actionType",
-			event:       ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel | UpdateNodeTaint},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel | fwk.UpdateNodeTaint},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  true,
 		},
 		{
 			name:        "event with resource = 'Pod' matching with coming events carries unschedulablePod",
-			event:       ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel | UpdateNodeTaint},
-			comingEvent: ClusterEvent{Resource: unschedulablePod, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel | fwk.UpdateNodeTaint},
+			comingEvent: fwk.ClusterEvent{Resource: unschedulablePod, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  true,
 		},
 		{
 			name:        "event with resource = '*' matching with coming events carries same actionType",
-			event:       ClusterEvent{Resource: WildCard, ActionType: UpdateNodeLabel},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.UpdateNodeLabel},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  true,
 		},
 		{
 			name:        "event with resource = '*' matching with coming events carries different actionType",
-			event:       ClusterEvent{Resource: WildCard, ActionType: UpdateNodeLabel},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: UpdateNodeAllocatable},
+			event:       fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.UpdateNodeLabel},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeAllocatable},
 			wantResult:  false,
 		},
 		{
 			name:        "event matching with coming events carries '*' resources",
-			event:       ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel},
-			comingEvent: ClusterEvent{Resource: WildCard, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  false,
 		},
 		{
 			name:        "event with resource = '*' matching with coming events carrying a too broad actionType",
-			event:       ClusterEvent{Resource: WildCard, ActionType: UpdateNodeLabel},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: Update},
+			event:       fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.UpdateNodeLabel},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.Update},
 			wantResult:  false,
 		},
 		{
 			name:        "event with resource = '*' matching with coming events carrying a more specific actionType",
-			event:       ClusterEvent{Resource: WildCard, ActionType: Update},
-			comingEvent: ClusterEvent{Resource: Pod, ActionType: UpdateNodeLabel},
+			event:       fwk.ClusterEvent{Resource: fwk.WildCard, ActionType: fwk.Update},
+			comingEvent: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.UpdateNodeLabel},
 			wantResult:  true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.event.Match(tc.comingEvent)
+			got := MatchClusterEvents(tc.event, tc.comingEvent)
 			if got != tc.wantResult {
 				t.Fatalf("unexpected result")
 			}
@@ -2170,5 +2171,355 @@ func TestNodeInfoKMetadata(t *testing.T) {
 	// which becomes an empty string during output formatting.
 	if !strings.Contains(output, `Some NodeInfo slice nodes=["","<no node>","","worker"]`) {
 		tCtx.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
+func TestUpdateUsedPorts_PodAdd(t *testing.T) {
+	testCases := []struct {
+		ports HostPortInfo
+		pod   *v1.Pod
+		want  HostPortInfo
+	}{
+		{
+			ports: HostPortInfo{},
+			pod:   nil,
+			want:  HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: nil,
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+					ProtocolPort{"TCP", 8002}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{},
+			pod: st.MakePod().
+				InitContainerPort(false /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(false /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+					ProtocolPort{"TCP", 8002}: struct{}{},
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		ni := NodeInfo{UsedPorts: tc.ports}
+		ni.updateUsedPorts(tc.pod, true)
+		if diff := cmp.Diff(tc.want, ni.UsedPorts); diff != "" {
+			t.Errorf("updateUsedPorts() unexpected diff (-want, +got):\n%s", diff)
+		}
+	}
+}
+
+func TestUpdateUsedPorts_PodRemove(t *testing.T) {
+	testCases := []struct {
+		ports HostPortInfo
+		pod   *v1.Pod
+		want  HostPortInfo
+	}{
+		{
+			ports: HostPortInfo{},
+			pod:   nil,
+			want:  HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: nil,
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+					ProtocolPort{"TCP", 8002}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				ContainerPort([]v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(false /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8001,
+						HostPort:      8001,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+		{
+			ports: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+					ProtocolPort{"TCP", 8002}: struct{}{},
+				},
+			},
+			pod: st.MakePod().
+				InitContainerPort(true /* sidecar */, []v1.ContainerPort{
+					{
+						ContainerPort: 8002,
+						HostPort:      8002,
+						Protocol:      v1.ProtocolTCP,
+					}}).
+				Obj(),
+			want: HostPortInfo{
+				"0.0.0.0": {
+					ProtocolPort{"TCP", 8001}: struct{}{},
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		ni := NodeInfo{UsedPorts: tc.ports}
+		ni.updateUsedPorts(tc.pod, false)
+		if diff := cmp.Diff(tc.want, ni.UsedPorts); diff != "" {
+			t.Errorf("updateUsedPorts() unexpected diff (-want, +got):\n%s", diff)
+		}
 	}
 }

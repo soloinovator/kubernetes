@@ -99,6 +99,10 @@ func (c *CacheDelegator) GetCurrentResourceVersion(ctx context.Context) (uint64,
 	return c.storage.GetCurrentResourceVersion(ctx)
 }
 
+func (c *CacheDelegator) SetKeysFunc(keys storage.KeysFunc) {
+	c.storage.SetKeysFunc(keys)
+}
+
 func (c *CacheDelegator) Delete(ctx context.Context, key string, out runtime.Object, preconditions *storage.Preconditions, validateDeletion storage.ValidateObjectFunc, cachedExistingObject runtime.Object, opts storage.DeleteOptions) error {
 	// Ignore the suggestion and try to pass down the current version of the object
 	// read from cache.
@@ -207,26 +211,18 @@ func (c *CacheDelegator) GetList(ctx context.Context, key string, opts storage.L
 			return c.storage.GetList(ctx, key, opts, listObj)
 		}
 	}
-	if result.ConsistentRead {
-		listRV, err = c.storage.GetCurrentResourceVersion(ctx)
-		if err != nil {
-			return err
-		}
-		// Setting resource version for consistent read in cache based on current ResourceVersion in etcd.
-		opts.ResourceVersion = strconv.FormatInt(int64(listRV), 10)
-	}
 	err = c.cacher.GetList(ctx, key, opts, listObj)
 	success := "true"
 	fallback := "false"
 	if err != nil {
-		if errors.IsResourceExpired(err) {
+		if errors.IsResourceExpired(err) && utilfeature.DefaultFeatureGate.Enabled(features.ListFromCacheSnapshot) {
 			return c.storage.GetList(ctx, key, opts, listObj)
 		}
 		if result.ConsistentRead {
+			// IsTooLargeResourceVersion occurs when the requested RV is higher than cache's current RV
+			// and cache hasn't caught up within the timeout period. Fall back to etcd.
 			if storage.IsTooLargeResourceVersion(err) {
 				fallback = "true"
-				// Reset resourceVersion during fallback from consistent read.
-				opts.ResourceVersion = ""
 				err = c.storage.GetList(ctx, key, opts, listObj)
 			}
 			if err != nil {
@@ -265,8 +261,8 @@ func (c *CacheDelegator) GuaranteedUpdate(ctx context.Context, key string, desti
 	return c.storage.GuaranteedUpdate(ctx, key, destination, ignoreNotFound, preconditions, tryUpdate, nil)
 }
 
-func (c *CacheDelegator) Count(pathPrefix string) (int64, error) {
-	return c.storage.Count(pathPrefix)
+func (c *CacheDelegator) Stats(ctx context.Context) (storage.Stats, error) {
+	return c.storage.Stats(ctx)
 }
 
 func (c *CacheDelegator) ReadinessCheck() error {

@@ -272,7 +272,9 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 			testContainerEnv(ctx, f, pod, pod.Spec.Containers[1].Name, true, container1Env...)
 		})
 
-		ginkgo.It("blocks new pod after force-delete", func(ctx context.Context) {
+		// https://github.com/kubernetes/kubernetes/issues/131513 was fixed in master for 1.34 and not backported,
+		// so this test only passes for kubelet >= 1.34.
+		f.It("blocks new pod after force-delete", f.WithLabel("KubeletMinVersion:1.34"), func(ctx context.Context) {
 			// The problem with a force-deleted pod is that kubelet
 			// is not necessarily done yet with tearing down the
 			// pod at the time when the pod and its claim are
@@ -405,6 +407,18 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 			// This must succeed for the pod to start.
 			pod.Spec.InitContainers[0].Command = []string{"sh", "-c", "env | grep user_a=b"}
 			b.create(ctx, pod, template)
+
+			b.testPod(ctx, f, pod)
+		})
+
+		ginkgo.It("supports init containers with external claims", func(ctx context.Context) {
+			pod := b.podExternal()
+			claim := b.externalClaim()
+			pod.Spec.InitContainers = []v1.Container{pod.Spec.Containers[0]}
+			pod.Spec.InitContainers[0].Name += "-init"
+			// This must succeed for the pod to start.
+			pod.Spec.InitContainers[0].Command = []string{"sh", "-c", "env | grep user_a=b"}
+			b.create(ctx, pod, claim)
 
 			b.testPod(ctx, f, pod)
 		})
@@ -1538,12 +1552,19 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 			b.create(ctx, pod, template)
 			b.testPod(ctx, f, pod)
 			ginkgo.DeferCleanup(func(ctx context.Context) {
-				// Unblock shutdown by removing the finalizer.
-				pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, pod.Name, metav1.GetOptions{})
-				framework.ExpectNoError(err, "get pod")
-				pod.Finalizers = nil
-				_, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Update(ctx, pod, metav1.UpdateOptions{})
-				framework.ExpectNoError(err, "remove finalizers from pod")
+				gomega.Eventually(ctx, func(ctx context.Context) error {
+					// Unblock shutdown by removing the finalizer.
+					pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, pod.Name, metav1.GetOptions{})
+					if err != nil {
+						return fmt.Errorf("get pod: %w", err)
+					}
+					pod.Finalizers = nil
+					_, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Update(ctx, pod, metav1.UpdateOptions{})
+					if err != nil {
+						return fmt.Errorf("remove finalizers from pod: %w", err)
+					}
+					return nil
+				}).WithTimeout(30*time.Second).WithPolling(1*time.Second).Should(gomega.Succeed(), "Failed to remove finalizers")
 			})
 
 			// Now evict it.
@@ -2096,7 +2117,8 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 		framework.ExpectNoError(e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, f.Timeouts.PodDelete))
 	})
 
-	ginkgo.It("rolling update", func(ctx context.Context) {
+	// Seamless upgrade support was added in Kubernetes 1.33.
+	f.It("rolling update", f.WithLabel("KubeletMinVersion:1.33"), func(ctx context.Context) {
 		nodes := NewNodesNow(ctx, f, 1, 1)
 
 		oldDriver := NewDriverInstance(f)
@@ -2138,7 +2160,8 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 		framework.ExpectNoError(e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, f.Timeouts.PodDelete))
 	})
 
-	ginkgo.It("failed update", func(ctx context.Context) {
+	// Seamless upgrade support was added in Kubernetes 1.33.
+	f.It("failed update", f.WithLabel("KubeletMinVersion:1.33"), func(ctx context.Context) {
 		nodes := NewNodesNow(ctx, f, 1, 1)
 
 		oldDriver := NewDriverInstance(f)
@@ -2181,7 +2204,7 @@ var _ = framework.SIGDescribe("node")(framework.WithLabel("DRA"), feature.Dynami
 		framework.ExpectNoError(e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, f.Timeouts.PodDelete))
 	})
 
-	f.It("sequential update with pods replacing each other", framework.WithSlow(), func(ctx context.Context) {
+	f.It("sequential update with pods replacing each other", f.WithLabel("KubeletMinVersion:1.33"), framework.WithSlow(), func(ctx context.Context) {
 		nodes := NewNodesNow(ctx, f, 1, 1)
 
 		// Same driver name, same socket path.

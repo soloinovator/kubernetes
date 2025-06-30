@@ -1,10 +1,6 @@
 {
   "spec": {
     "pinnedModules": {
-      "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc": {
-        "Version": "v0.60.0",
-        "Reason": "Need an etcd release with https://github.com/etcd-io/etcd/pull/20017"
-      },
       "github.com/libopenstorage/openstorage": {
         "Version": "v1.0.0",
         "Reason": "portworx csi driver has been deprecated and will be removed - https://github.com/kubernetes/enhancements/issues/2589"
@@ -24,6 +20,7 @@
       "github.com/bketelsen/crypt": "unused, crypto",
       "github.com/containerd/cgroups": "standardize on single cgroups library from runc, refer #128157",
       "github.com/davecgh/go-spew": "refer to #103942",
+      "github.com/evanphx/json-patch/v5": "refer to https://github.com/kubernetes/kubernetes/pull/91622#issuecomment-637087847",
       "github.com/form3tech-oss/jwt-go": "unmaintained, archive mode",
       "github.com/getsentry/raven-go": "unmaintained, archive mode",
       "github.com/go-bindata/go-bindata": "refer to #99829",
@@ -227,7 +224,6 @@
       "github.com/pkg/errors": [
         "github.com/Microsoft/hnslib",
         "github.com/google/cadvisor",
-        "k8s.io/kubernetes",
         "sigs.k8s.io/kustomize/api",
         "sigs.k8s.io/kustomize/kustomize/v5"
       ],
