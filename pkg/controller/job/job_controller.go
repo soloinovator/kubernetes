@@ -109,6 +109,9 @@ type Controller struct {
 	// A store of pods, populated by the podController
 	podStore corelisters.PodLister
 
+	// podIndexer allows looking up pods by ControllerRef UID
+	podIndexer cache.Indexer
+
 	// Jobs that need to be updated
 	queue workqueue.TypedRateLimitingInterface[string]
 
@@ -222,6 +225,12 @@ func newControllerWithClock(ctx context.Context, podInformer coreinformers.PodIn
 	}
 	jm.podStore = podInformer.Lister()
 	jm.podStoreSynced = podInformer.Informer().HasSynced
+
+	err := controller.AddPodControllerUIDIndexer(podInformer.Informer())
+	if err != nil {
+		return nil, fmt.Errorf("adding Pod controller UID indexer: %w", err)
+	}
+	jm.podIndexer = podInformer.Informer().GetIndexer()
 
 	jm.updateStatusHandler = jm.updateJobStatus
 	jm.patchJobHandler = jm.patchJob
@@ -543,6 +552,12 @@ func (jm *Controller) deleteJob(logger klog.Logger, obj interface{}) {
 	}
 	jm.finishedJobExpectations.Delete(jobObj.UID)
 	jm.enqueueLabelSelector(jobObj)
+
+	key := cache.MetaObjectToName(jobObj).String()
+	err := jm.podBackoffStore.removeBackoffRecord(key)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("error removing backoff record %w", err))
+	}
 }
 
 func (jm *Controller) enqueueLabelSelector(jobObj *batch.Job) {
@@ -752,9 +767,9 @@ func (jm *Controller) getPodsForJob(ctx context.Context, j *batch.Job) ([]*v1.Po
 	if err != nil {
 		return nil, fmt.Errorf("couldn't convert Job selector: %v", err)
 	}
-	// List all pods to include those that don't match the selector anymore
-	// but have a ControllerRef pointing to this controller.
-	pods, err := jm.podStore.Pods(j.Namespace).List(labels.Everything())
+
+	// list all pods managed by this Job using the pod indexer
+	pods, err := controller.FilterPodsByOwner(jm.podIndexer, &j.ObjectMeta)
 	if err != nil {
 		return nil, err
 	}

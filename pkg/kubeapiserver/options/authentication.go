@@ -61,7 +61,7 @@ import (
 	"k8s.io/kubernetes/pkg/serviceaccount"
 	"k8s.io/kubernetes/pkg/util/filesystem"
 	"k8s.io/kubernetes/plugin/pkg/auth/authenticator/token/bootstrap"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -321,7 +321,6 @@ func (o *BuiltInAuthenticationOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.AuthenticationConfigFile, "authentication-config", o.AuthenticationConfigFile, ""+
 		"File with Authentication Configuration to configure the JWT Token authenticator or the anonymous authenticator. "+
 		"Requires the StructuredAuthenticationConfiguration feature gate. "+
-		"Also requires the feature gate AnonymousAuthConfigurableEndpoints to configure the anonymous authenticator in the config file. "+
 		"This flag is mutually exclusive with the --oidc-* flags if the file configures the JWT Token authenticator. "+
 		"This flag is mutually exclusive with --anonymous-auth if the file configures the Anonymous authenticator.")
 
@@ -492,7 +491,7 @@ func (o *BuiltInAuthenticationOptions) ToAuthenticationConfig() (kubeauthenticat
 	if len(o.AuthenticationConfigFile) > 0 {
 		var err error
 		if ret.AuthenticationConfig, ret.AuthenticationConfigData, err = loadAuthenticationConfig(o.AuthenticationConfigFile); err != nil {
-			return kubeauthenticator.Config{}, err
+			return kubeauthenticator.Config{}, fmt.Errorf("failed to load authentication configuration from file %q: %w", o.AuthenticationConfigFile, err)
 		}
 	} else {
 		ret.AuthenticationConfig = &apiserver.AuthenticationConfiguration{}
@@ -525,7 +524,7 @@ func (o *BuiltInAuthenticationOptions) ToAuthenticationConfig() (kubeauthenticat
 			},
 			ClaimMappings: apiserver.ClaimMappings{
 				Username: apiserver.PrefixedClaimOrExpression{
-					Prefix: pointer.String(usernamePrefix),
+					Prefix: ptr.To(usernamePrefix),
 					Claim:  o.OIDC.UsernameClaim,
 				},
 			},
@@ -533,7 +532,7 @@ func (o *BuiltInAuthenticationOptions) ToAuthenticationConfig() (kubeauthenticat
 
 		if len(o.OIDC.GroupsClaim) > 0 {
 			jwtAuthenticator.ClaimMappings.Groups = apiserver.PrefixedClaimOrExpression{
-				Prefix: pointer.String(o.OIDC.GroupsPrefix),
+				Prefix: ptr.To(o.OIDC.GroupsPrefix),
 				Claim:  o.OIDC.GroupsClaim,
 			}
 		}
@@ -578,7 +577,7 @@ func (o *BuiltInAuthenticationOptions) ToAuthenticationConfig() (kubeauthenticat
 	}
 
 	if err := apiservervalidation.ValidateAuthenticationConfiguration(authenticationcel.NewDefaultCompiler(), ret.AuthenticationConfig, ret.ServiceAccountIssuers).ToAggregate(); err != nil {
-		return kubeauthenticator.Config{}, err
+		return kubeauthenticator.Config{}, fmt.Errorf("invalid authentication configuration: %w", err)
 	}
 
 	if o.RequestHeader != nil {

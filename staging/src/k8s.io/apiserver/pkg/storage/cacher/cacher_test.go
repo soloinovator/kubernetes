@@ -38,6 +38,7 @@ import (
 	"k8s.io/apiserver/pkg/storage"
 	etcd3testing "k8s.io/apiserver/pkg/storage/etcd3/testing"
 	storagetesting "k8s.io/apiserver/pkg/storage/testing"
+	"k8s.io/apiserver/pkg/storage/value/encrypt/identity"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/cache"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -186,7 +187,7 @@ func TestLists(t *testing.T) {
 					t.Parallel()
 					ctx, cacher, server, terminate := testSetupWithEtcdServer(t)
 					t.Cleanup(terminate)
-					storagetesting.RunTestList(ctx, t, cacher, increaseRV(server.V3Client.Client), true)
+					storagetesting.RunTestList(ctx, t, cacher, increaseRV(server.V3Client.Client), true, server.V3Client.Kubernetes.(*storagetesting.KubernetesRecorder))
 				})
 
 				t.Run("ConsistentList", func(t *testing.T) {
@@ -279,10 +280,15 @@ func TestTransformationFailure(t *testing.T) {
 	// TODO(#109831): Enable use of this test and run it.
 }
 
-func TestCount(t *testing.T) {
-	ctx, cacher, terminate := testSetup(t)
-	t.Cleanup(terminate)
-	storagetesting.RunTestCount(ctx, t, cacher)
+func TestStats(t *testing.T) {
+	for _, sizeBasedListCostEstimate := range []bool{true, false} {
+		t.Run(fmt.Sprintf("SizeBasedListCostEstimate=%v", sizeBasedListCostEstimate), func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SizeBasedListCostEstimate, sizeBasedListCostEstimate)
+			ctx, cacher, terminate := testSetup(t)
+			t.Cleanup(terminate)
+			storagetesting.RunTestStats(ctx, t, cacher, codecs.LegacyCodec(examplev1.SchemeGroupVersion), identity.NewEncryptCheckTransformer(), sizeBasedListCostEstimate)
+		})
+	}
 }
 
 func TestWatch(t *testing.T) {
@@ -639,4 +645,19 @@ func BenchmarkStoreList(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkStoreStats(b *testing.B) {
+	klog.SetLogger(logr.Discard())
+	data := storagetesting.PrepareBenchchmarkData(50, 3_000, 5_000)
+	ctx, cacher, _, terminate := testSetupWithEtcdServer(b)
+	b.Cleanup(terminate)
+	var out example.Pod
+	for _, pod := range data.Pods {
+		err := cacher.Create(ctx, computePodKey(pod), pod, &out, 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	storagetesting.RunBenchmarkStoreStats(ctx, b, cacher)
 }

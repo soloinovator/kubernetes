@@ -1322,7 +1322,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 		isInBackOff, msg, err := m.doBackOff(pod, spec.container, podStatus, backOff)
 		if isInBackOff {
 			startContainerResult.Fail(err, msg)
-			klog.V(4).InfoS("Backing Off restarting container in pod", "containerType", typeName, "container", spec.container, "pod", klog.KObj(pod))
+			klog.V(4).InfoS("Backing Off restarting container in pod", "containerType", typeName, "container", spec.container.Name, "pod", klog.KObj(pod))
 			return err
 		}
 
@@ -1330,7 +1330,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 		if sc.HasWindowsHostProcessRequest(pod, spec.container) {
 			metrics.StartedHostProcessContainersTotal.WithLabelValues(metricLabel).Inc()
 		}
-		klog.V(4).InfoS("Creating container in pod", "containerType", typeName, "container", spec.container, "pod", klog.KObj(pod))
+		klog.V(4).InfoS("Creating container in pod", "containerType", typeName, "container", spec.container.Name, "pod", klog.KObj(pod))
 
 		// We fail late here to populate the "ErrImagePull" and "ImagePullBackOff" correctly to the end user.
 		imageVolumes, err := m.toKubeContainerImageVolumes(imageVolumePullResults, spec.container, pod, startContainerResult)
@@ -1353,9 +1353,9 @@ func (m *kubeGenericRuntimeManager) SyncPod(ctx context.Context, pod *v1.Pod, po
 			// repetitive log spam
 			switch {
 			case err == images.ErrImagePullBackOff:
-				klog.V(3).InfoS("Container start failed in pod", "containerType", typeName, "container", spec.container, "pod", klog.KObj(pod), "containerMessage", msg, "err", err)
+				klog.V(3).InfoS("Container start failed in pod", "containerType", typeName, "container", spec.container.Name, "pod", klog.KObj(pod), "containerMessage", msg, "err", err)
 			default:
-				utilruntime.HandleError(fmt.Errorf("%v %+v start failed in pod %v: %v: %s", typeName, spec.container, format.Pod(pod), err, msg))
+				utilruntime.HandleError(fmt.Errorf("%v %v start failed in pod %v: %w: %s", typeName, spec.container.Name, format.Pod(pod), err, msg))
 			}
 			return err
 		}
@@ -1446,7 +1446,7 @@ type imageVolumePulls = map[string]imageVolumePullResult
 // If spec is nil, then err and msg should be set.
 // If err is nil, then spec should be set.
 type imageVolumePullResult struct {
-	spec runtimeapi.ImageSpec
+	spec *runtimeapi.ImageSpec
 	err  error
 	msg  string
 }
@@ -1475,7 +1475,7 @@ func (m *kubeGenericRuntimeManager) toKubeContainerImageVolumes(imageVolumePullR
 			continue
 		}
 
-		imageVolumes[v.Name] = &res.spec
+		imageVolumes[v.Name] = res.spec
 	}
 
 	if lastErr != nil {
@@ -1514,7 +1514,7 @@ func (m *kubeGenericRuntimeManager) getImageVolumes(ctx context.Context, pod *v1
 		}
 
 		klog.V(4).InfoS("Pulled image", "ref", ref, "pod", klog.KObj(pod))
-		res[volume.Name] = imageVolumePullResult{spec: runtimeapi.ImageSpec{
+		res[volume.Name] = imageVolumePullResult{spec: &runtimeapi.ImageSpec{
 			Image:              ref,
 			UserSpecifiedImage: volume.Image.Reference,
 			RuntimeHandler:     podRuntimeHandler,

@@ -31,6 +31,7 @@ import (
 	cadvisorapiv2 "github.com/google/cadvisor/info/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -159,10 +160,10 @@ func (p *criStatsProvider) listPodStats(ctx context.Context, updateCPUNanoCoreUs
 }
 
 func (p *criStatsProvider) listPodStatsPartiallyFromCRI(ctx context.Context, updateCPUNanoCoreUsage bool, containerMap map[string]*runtimeapi.Container, podSandboxMap map[string]*runtimeapi.PodSandbox, rootFsInfo *cadvisorapiv2.FsInfo) ([]statsapi.PodStats, error) {
-	// fsIDtoInfo is a map from filesystem id to its stats. This will be used
+	// fsIDtoInfo is a map from mountpoint to its stats. This will be used
 	// as a cache to avoid querying cAdvisor for the filesystem stats with the
 	// same filesystem id many times.
-	fsIDtoInfo := make(map[runtimeapi.FilesystemIdentifier]*cadvisorapiv2.FsInfo)
+	fsIDtoInfo := make(map[string]*cadvisorapiv2.FsInfo)
 
 	// sandboxIDToPodStats is a temporary map from sandbox ID to its pod stats.
 	sandboxIDToPodStats := make(map[string]*statsapi.PodStats)
@@ -244,7 +245,7 @@ func (p *criStatsProvider) listPodStatsStrictlyFromCRI(ctx context.Context, upda
 		return nil, err
 	}
 
-	fsIDtoInfo := make(map[runtimeapi.FilesystemIdentifier]*cadvisorapiv2.FsInfo)
+	fsIDtoInfo := make(map[string]*cadvisorapiv2.FsInfo)
 	summarySandboxStats := make([]statsapi.PodStats, 0, len(podSandboxMap))
 	for _, criSandboxStat := range criSandboxStats {
 		if criSandboxStat == nil || criSandboxStat.Attributes == nil {
@@ -343,6 +344,7 @@ func (p *criStatsProvider) ListPodCPUAndMemoryStats(ctx context.Context) ([]stat
 		// Fill available CPU and memory stats for full set of required pod stats
 		cs := p.makeContainerCPUAndMemoryStats(stats, container)
 		p.addPodCPUMemoryStats(ps, types.UID(podSandbox.Metadata.Uid), allInfos, cs)
+		p.addSwapStats(ps, types.UID(podSandbox.Metadata.Uid), allInfos, cs)
 
 		// If cadvisor stats is available for the container, use it to populate
 		// container stats
@@ -626,7 +628,7 @@ func (p *criStatsProvider) makeContainerStats(
 	stats *runtimeapi.ContainerStats,
 	container *runtimeapi.Container,
 	rootFsInfo *cadvisorapiv2.FsInfo,
-	fsIDtoInfo map[runtimeapi.FilesystemIdentifier]*cadvisorapiv2.FsInfo,
+	fsIDtoInfo map[string]*cadvisorapiv2.FsInfo,
 	meta *runtimeapi.PodSandboxMetadata,
 	updateCPUNanoCoreUsage bool,
 ) (*statsapi.ContainerStats, error) {
@@ -704,13 +706,13 @@ func (p *criStatsProvider) makeContainerStats(
 	fsID := stats.GetWritableLayer().GetFsId()
 	var err error
 	if fsID != nil {
-		imageFsInfo, found := fsIDtoInfo[*fsID]
+		imageFsInfo, found := fsIDtoInfo[fsID.Mountpoint]
 		if !found {
 			imageFsInfo, err = p.getFsInfo(fsID)
 			if err != nil {
 				return nil, fmt.Errorf("get filesystem info: %w", err)
 			}
-			fsIDtoInfo[*fsID] = imageFsInfo
+			fsIDtoInfo[fsID.Mountpoint] = imageFsInfo
 		}
 		if imageFsInfo != nil {
 			// The image filesystem id is unknown to the local node or there's
@@ -743,6 +745,11 @@ func (p *criStatsProvider) makeContainerCPUAndMemoryStats(
 		StartTime: metav1.NewTime(time.Unix(0, container.CreatedAt)),
 		CPU:       &statsapi.CPUStats{},
 		Memory:    &statsapi.MemoryStats{},
+		Swap: &statsapi.SwapStats{
+			Time:               metav1.NewTime(time.Unix(0, time.Now().UnixNano())),
+			SwapUsageBytes:     uint64Ptr(0),
+			SwapAvailableBytes: uint64Ptr(0),
+		},
 		// UserDefinedMetrics is not supported by CRI.
 	}
 	if stats.Cpu != nil {
@@ -770,6 +777,15 @@ func (p *criStatsProvider) makeContainerCPUAndMemoryStats(
 	} else {
 		result.Memory.Time = metav1.NewTime(time.Unix(0, time.Now().UnixNano()))
 		result.Memory.WorkingSetBytes = uint64Ptr(0)
+	}
+	if stats.Swap != nil {
+		result.Swap.Time = metav1.NewTime(time.Unix(0, stats.Swap.Timestamp))
+		if stats.Swap.SwapUsageBytes != nil {
+			result.Swap.SwapUsageBytes = &stats.Swap.SwapUsageBytes.Value
+		}
+		if stats.Swap.SwapAvailableBytes != nil {
+			result.Swap.SwapAvailableBytes = &stats.Swap.SwapAvailableBytes.Value
+		}
 	}
 
 	return result
